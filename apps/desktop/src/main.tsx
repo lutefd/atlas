@@ -1,63 +1,16 @@
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { invoke } from "@tauri-apps/api/core";
 import CodeMirror from "@uiw/react-codemirror";
-import { Clipboard, FileText, Inbox, Plus, Search, Tags, Trash2 } from "lucide-react";
+import { Clipboard, FileText, Inbox, Pencil, Plus, Search, Tags, Trash2, X } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { create } from "zustand";
 import { deriveEntities, deriveTimelineEvents, parseEvidence } from "@atlas/core";
 import type { Evidence, Incident } from "@atlas/shared";
+import { addEvidence, addTag, clearEvidenceParsers, createIncident, deleteEvidence, deleteIncident, deleteTag, loadAttachment, loadSnapshot, renameIncident, saveParserOutput, search, type SearchResult, type Snapshot } from "./api";
 import "./styles.css";
 
-type IncidentRow = Incident & { created_at?: string };
-type EvidenceRow = Partial<Evidence> & {
-  id: string;
-  incident_id?: string;
-  content_text?: string | null;
-  content_hash?: string;
-  created_at?: string;
-  metadata_json?: string;
-  attachment_id?: string | null;
-};
-
-type Snapshot = {
-  incidents: IncidentRow[];
-  evidence: EvidenceRow[];
-  timeline_events: Array<{ id: string; incident_id: string; timestamp: string; title: string; description: string; confidence: number; source_evidence_id: string | null }>;
-  entities: Array<{ id: string; incident_id: string; entity_type: string; name: string; confidence: number; source_evidence_id: string | null }>;
-  tags: Array<{ id: string; incident_id: string; name: string }>;
-};
-
-type SearchResult = { kind: string; refId: string; title: string; snippet: string };
-type AttachmentData = { name: string; mime_type: string; base64: string };
-
 const client = new QueryClient();
-const useUi = create<{ selectedIncidentId: string | null; selectIncident: (id: string) => void }>((set) => ({ selectedIncidentId: null, selectIncident: (id) => set({ selectedIncidentId: id }) }));
-
-function parseMetadata(value: unknown): Record<string, unknown> {
-  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
-  if (typeof value !== "string") return {};
-  try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function toCamelEvidence(row: EvidenceRow): Evidence {
-  return {
-    id: row.id,
-    incidentId: row.incidentId ?? row.incident_id ?? "",
-    kind: row.kind ?? "text",
-    source: row.source ?? "unknown",
-    contentText: row.contentText ?? row.content_text ?? null,
-    contentHash: row.contentHash ?? row.content_hash ?? "",
-    createdAt: row.createdAt ?? row.created_at ?? new Date().toISOString(),
-    metadata: parseMetadata(row.metadata ?? row.metadata_json),
-    attachmentId: row.attachmentId ?? row.attachment_id ?? null
-  };
-}
+const useUi = create<{ selectedIncidentId: string | null; selectedEvidenceId: string | null; selectIncident: (id: string) => void; selectEvidence: (id: string | null) => void }>((set) => ({ selectedIncidentId: null, selectedEvidenceId: null, selectIncident: (id) => set({ selectedIncidentId: id, selectedEvidenceId: null }), selectEvidence: (id) => set({ selectedEvidenceId: id }) }));
 
 async function fileToBase64(file: File) {
   const buffer = await file.arrayBuffer();
@@ -76,12 +29,12 @@ async function ingestEvidence(input: { incidentId: string; kind: string; source:
     attachmentName = input.file.name;
     attachmentBase64 = await fileToBase64(input.file);
   }
-  const evidence = toCamelEvidence(await invoke("add_evidence", { input: { incident_id: input.incidentId, kind: input.kind, source: input.source, content_text: input.text ?? null, metadata_json: JSON.stringify({ fileName: input.file?.name }), attachment_name: attachmentName, attachment_mime_type: input.file?.type || null, attachment_base64: attachmentBase64 } }));
+  const evidence = await addEvidence({ incidentId: input.incidentId, kind: input.kind as Evidence["kind"], source: input.source, text: input.text, metadata: { fileName: input.file?.name }, attachmentName, attachmentMimeType: input.file?.type || null, attachmentBase64 });
   const outputs = await parseEvidence(evidence);
   for (const output of outputs) {
     const timeline = deriveTimelineEvents(evidence.incidentId, output);
     const entities = deriveEntities(evidence.incidentId, output);
-    await invoke("save_parser_output", { input: { id: output.id, evidence_id: output.evidenceId, parser_name: output.parserName, parser_version: output.parserVersion, output_json: JSON.stringify(output.output), timeline_events_json: JSON.stringify(timeline.map((event) => ({ id: event.id, incident_id: event.incidentId, timestamp: event.timestamp, title: event.title, description: event.description, confidence: event.confidence, source_evidence_id: event.sourceEvidenceId, source_parser_output_id: event.sourceParserOutputId }))), entities_json: JSON.stringify(entities.map((entity) => ({ id: entity.id, incident_id: entity.incidentId, entity_type: entity.type, name: entity.name, confidence: entity.confidence, source_evidence_id: entity.sourceEvidenceId, source_parser_output_id: entity.sourceParserOutputId }))) } });
+    await saveParserOutput({ id: output.id, evidenceId: output.evidenceId, parserName: output.parserName, parserVersion: output.parserVersion, output: output.output, timelineEvents: timeline, entities });
   }
 }
 
@@ -103,17 +56,22 @@ function Workspace() {
   const [incidentStatus, setIncidentStatus] = useState<string | null>(null);
   const [confirmingIncidentId, setConfirmingIncidentId] = useState<string | null>(null);
   const selectedIncidentId = useUi((state) => state.selectedIncidentId);
+  const selectedEvidenceId = useUi((state) => state.selectedEvidenceId);
   const selectIncident = useUi((state) => state.selectIncident);
-  const { data } = useQuery({ queryKey: ["snapshot"], queryFn: () => invoke<Snapshot>("load_snapshot") });
+  const selectEvidence = useUi((state) => state.selectEvidence);
+  const { data } = useQuery({ queryKey: ["snapshot"], queryFn: loadSnapshot });
   const incidents = data?.incidents ?? [];
   const activeId = selectedIncidentId ?? incidents[0]?.id ?? null;
   const active = incidents.find((incident) => incident.id === activeId) ?? null;
-  const evidence = (data?.evidence ?? []).filter((item) => (item.incidentId ?? item.incident_id) === activeId);
-  const timeline = (data?.timeline_events ?? []).filter((item) => item.incident_id === activeId);
-  const entities = (data?.entities ?? []).filter((item) => item.incident_id === activeId);
-  const tags = (data?.tags ?? []).filter((item) => item.incident_id === activeId);
-  const createIncident = useMutation({ mutationFn: (title: string) => invoke<Incident>("create_incident", { title }), onSuccess: (incident) => { selectIncident(incident.id); queryClient.invalidateQueries({ queryKey: ["snapshot"] }); } });
-  const deleteIncident = useMutation({ mutationFn: (incidentId: string) => invoke("delete_incident", { incidentId }), onSuccess: () => { useUi.setState({ selectedIncidentId: null }); queryClient.invalidateQueries({ queryKey: ["snapshot"] }); }, onError: (error) => console.error("Failed to delete incident:", error) });
+  const evidence = (data?.evidence ?? []).filter((item) => item.incidentId === activeId);
+  const timeline = (data?.timelineEvents ?? []).filter((item) => item.incidentId === activeId);
+  const entities = (data?.entities ?? []).filter((item) => item.incidentId === activeId);
+  const tags = (data?.tags ?? []).filter((item) => item.incidentId === activeId);
+  const selectedEvidence = evidence.find((item) => item.id === selectedEvidenceId) ?? null;
+  const [editingIncident, setEditingIncident] = useState<{ id: string; surface: "sidebar" | "header" } | null>(null);
+  const createIncidentMutation = useMutation({ mutationFn: createIncident, onSuccess: (incident) => { selectIncident(incident.id); queryClient.invalidateQueries({ queryKey: ["snapshot"] }); } });
+  const deleteIncidentMutation = useMutation({ mutationFn: deleteIncident, onSuccess: () => { useUi.setState({ selectedIncidentId: null, selectedEvidenceId: null }); queryClient.invalidateQueries({ queryKey: ["snapshot"] }); }, onError: (error) => console.error("Failed to delete incident:", error) });
+  const renameIncidentMutation = useMutation({ mutationFn: ({ id, title }: { id: string; title: string }) => renameIncident(id, title), onSuccess: () => { setEditingIncident(null); queryClient.invalidateQueries({ queryKey: ["snapshot"] }); }, onError: (error) => console.error("Failed to rename incident:", error) });
   useEffect(() => {
     if (!incidentStatus && !confirmingIncidentId) return;
     const timeout = window.setTimeout(() => {
@@ -122,7 +80,7 @@ function Workspace() {
     }, 4000);
     return () => window.clearTimeout(timeout);
   }, [incidentStatus, confirmingIncidentId]);
-  async function deleteIncidentAfterConfirm(event: React.MouseEvent, incident: IncidentRow) {
+  async function deleteIncidentAfterConfirm(event: React.MouseEvent, incident: Incident) {
     event.stopPropagation();
     setIncidentStatus(null);
     if (confirmingIncidentId !== incident.id) {
@@ -131,7 +89,7 @@ function Workspace() {
       return;
     }
     try {
-      await deleteIncident.mutateAsync(incident.id);
+      await deleteIncidentMutation.mutateAsync(incident.id);
       setConfirmingIncidentId(null);
       setIncidentStatus("Incident deleted");
     } catch (caught) {
@@ -143,12 +101,37 @@ function Workspace() {
   return <main className="shell">
     <aside className="sidebar">
       <div className="brand">Atlas</div>
-      <button className="primary" onClick={() => createIncident.mutate(`Incident ${incidents.length + 1}`)}><Plus size={16} /> Create incident</button>
+      <button className="primary" onClick={() => createIncidentMutation.mutate(`Incident ${incidents.length + 1}`)}><Plus size={16} /> Create incident</button>
       {incidentStatus ? <div className="sidebar-status">{incidentStatus}</div> : null}
-      <div className="incident-list">{incidents.map((incident) => <div key={incident.id} className={incident.id === activeId ? "incident active" : "incident"}><button className="incident-select" onClick={() => selectIncident(incident.id)}>{incident.title}<span>{new Date(incident.createdAt ?? incident.created_at ?? new Date().toISOString()).toLocaleString()}</span></button><button className={confirmingIncidentId === incident.id ? "confirm-delete" : "icon-button danger"} title="Delete incident" onClick={(event) => void deleteIncidentAfterConfirm(event, incident)}>{confirmingIncidentId === incident.id ? "Confirm" : <Trash2 size={14} />}</button></div>)}</div>
+      <div className="incident-list">{incidents.map((incident) => {
+        const isEditing = editingIncident?.id === incident.id && editingIncident.surface === "sidebar";
+        return <div key={incident.id} className={incident.id === activeId ? "incident active" : "incident"}>
+          {isEditing ? <IncidentRenameInput initialTitle={incident.title} onSave={(title) => renameIncidentMutation.mutate({ id: incident.id, title })} onCancel={() => setEditingIncident(null)} /> : <button className="incident-select" onClick={() => selectIncident(incident.id)}>{incident.title}<span>{new Date(incident.createdAt).toLocaleString()}</span></button>}
+          {!isEditing && <div className="incident-actions">
+            <button className="icon-button" title="Rename incident" onClick={(event) => { event.stopPropagation(); setEditingIncident({ id: incident.id, surface: "sidebar" }); }}><Pencil size={14} /></button>
+            <button className={confirmingIncidentId === incident.id ? "confirm-delete" : "icon-button danger"} title="Delete incident" onClick={(event) => void deleteIncidentAfterConfirm(event, incident)}>{confirmingIncidentId === incident.id ? "Confirm" : <Trash2 size={14} />}</button>
+          </div>}
+        </div>;
+      })}</div>
     </aside>
-    {active ? <><section className="center"><h1>{active.title}</h1><EvidenceInbox incidentId={active.id} /><EvidenceStream evidence={evidence.map(toCamelEvidence)} /></section><RightPanel incidentId={active.id} timeline={timeline} entities={entities} tags={tags} /></> : <section className="empty"><Inbox size={40} /><h1>Create an incident workspace</h1><p>Paste logs, notes, screenshots, and files. Atlas keeps raw evidence immutable and derives structure beside it.</p></section>}
+    {active && data ? <><section className="center">{editingIncident?.id === active.id && editingIncident.surface === "header" ? <IncidentRenameInput className="header-rename" initialTitle={active.title} onSave={(title) => renameIncidentMutation.mutate({ id: active.id, title })} onCancel={() => setEditingIncident(null)} /> : <h1 onDoubleClick={() => setEditingIncident({ id: active.id, surface: "header" })} title="Double-click to rename">{active.title}</h1>}<EvidenceInbox incidentId={active.id} /><EvidenceStream evidence={evidence} selectedEvidenceId={selectedEvidenceId} onSelectEvidence={selectEvidence} parserOutputs={data?.parserOutputs ?? []} /></section><RightPanel incidentId={active.id} timeline={timeline} entities={entities} tags={tags} onSelectEvidence={selectEvidence} />{selectedEvidence ? <EvidenceDetail item={selectedEvidence} snapshot={data} onClose={() => selectEvidence(null)} /> : null}</> : <section className="empty"><Inbox size={40} /><h1>Create an incident workspace</h1><p>Paste logs, notes, screenshots, and files. Atlas keeps raw evidence immutable and derives structure beside it.</p></section>}
   </main>;
+}
+
+function IncidentRenameInput({ initialTitle, onSave, onCancel, className = "incident-rename" }: { initialTitle: string; onSave: (title: string) => void; onCancel: () => void; className?: string }) {
+  const [value, setValue] = useState(initialTitle);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const didFocus = React.useRef(false);
+
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    el.select();
+    didFocus.current = true;
+  }, []);
+
+  return <input ref={inputRef} className={className} value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onSave(value); } if (e.key === "Escape") onCancel(); }} onBlur={() => { if (!didFocus.current) return; if (value.trim() !== initialTitle.trim()) onSave(value); else onCancel(); }} />;
 }
 
 function EvidenceInbox({ incidentId }: { incidentId: string }) {
@@ -198,18 +181,18 @@ function EvidenceInbox({ incidentId }: { incidentId: string }) {
   </div>;
 }
 
-function EvidenceStream({ evidence }: { evidence: Evidence[] }) {
-  return <section className="evidence-section"><h2>Evidence</h2><div className="stream">{evidence.map((item) => <EvidenceCard item={item} key={item.id} />)}</div></section>;
+function EvidenceStream({ evidence, selectedEvidenceId, onSelectEvidence, parserOutputs }: { evidence: Evidence[]; selectedEvidenceId: string | null; onSelectEvidence: (id: string) => void; parserOutputs: Snapshot["parserOutputs"] }) {
+  return <section className="evidence-section"><h2>Evidence</h2><div className="stream">{evidence.map((item) => <EvidenceCard item={item} key={item.id} isSelected={item.id === selectedEvidenceId} onSelect={() => onSelectEvidence(item.id)} isParsed={parserOutputs.some((output) => output.evidenceId === item.id)} />)}</div></section>;
 }
 
-function EvidenceCard({ item }: { item: Evidence }) {
+function EvidenceCard({ item, isSelected, onSelect, isParsed }: { item: Evidence; isSelected: boolean; onSelect: () => void; isParsed: boolean }) {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<string | null>(null);
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
-  const { data: attachment } = useQuery({ queryKey: ["attachment", item.id], queryFn: () => invoke<AttachmentData | null>("load_attachment", { evidenceId: item.id }), enabled: Boolean(item.attachmentId) });
-  const deleteEvidence = useMutation({ mutationFn: () => invoke("delete_evidence", { evidenceId: item.id }), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["snapshot"] }); queryClient.removeQueries({ queryKey: ["attachment", item.id] }); }, onError: (error) => console.error("Failed to delete evidence:", error) });
-  const attachmentUrl = attachment ? `data:${attachment.mime_type};base64,${attachment.base64}` : null;
-  const isImageAttachment = Boolean(attachmentUrl && attachment?.mime_type.startsWith("image/"));
+  const { data: attachment } = useQuery({ queryKey: ["attachment", item.id], queryFn: () => loadAttachment(item.id), enabled: Boolean(item.attachmentId) });
+  const deleteEvidenceMutation = useMutation({ mutationFn: () => deleteEvidence(item.id), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["snapshot"] }); queryClient.removeQueries({ queryKey: ["attachment", item.id] }); }, onError: (error) => console.error("Failed to delete evidence:", error) });
+  const attachmentUrl = attachment ? `data:${attachment.mimeType};base64,${attachment.base64}` : null;
+  const isImageAttachment = Boolean(attachmentUrl && attachment?.mimeType.startsWith("image/"));
   useEffect(() => {
     if (!status && !isConfirmingDelete) return;
     const timeout = window.setTimeout(() => {
@@ -222,7 +205,7 @@ function EvidenceCard({ item }: { item: Evidence }) {
     setStatus(null);
     try {
       if (attachment && isImageAttachment) {
-        await navigator.clipboard.write([new ClipboardItem({ [attachment.mime_type]: base64ToBlob(attachment.base64, attachment.mime_type) })]);
+        await navigator.clipboard.write([new ClipboardItem({ [attachment.mimeType]: base64ToBlob(attachment.base64, attachment.mimeType) })]);
         setStatus("Image copied");
         return;
       }
@@ -240,14 +223,14 @@ function EvidenceCard({ item }: { item: Evidence }) {
       return;
     }
     try {
-      await deleteEvidence.mutateAsync();
+      await deleteEvidenceMutation.mutateAsync();
       setStatus("Evidence deleted");
     } catch (caught) {
       setStatus(caught instanceof Error ? caught.message : String(caught));
     }
   }
-  return <article className="card">
-    <div className="card-header"><div className="card-meta"><FileText size={14} />{item.kind} · {item.source} · {new Date(item.createdAt).toLocaleString()}</div><div className="card-actions"><button className="icon-button" title="Copy evidence" onClick={copyEvidence}><Clipboard size={14} /></button><button className={isConfirmingDelete ? "confirm-delete" : "icon-button danger"} title="Delete evidence" onClick={(event) => void deleteEvidenceAfterConfirm(event)}>{isConfirmingDelete ? "Confirm" : <Trash2 size={14} />}</button></div></div>
+  return <article className={isSelected ? "card selected" : "card"} onClick={onSelect}>
+    <div className="card-header"><div className="card-meta"><FileText size={14} />{item.kind} · {item.source} · {new Date(item.createdAt).toLocaleString()}<span className={isParsed ? "parse-dot parsed" : "parse-dot"} title={isParsed ? "Parsed" : "Unparsed"} /></div><div className="card-actions"><button className="icon-button" title="Copy evidence" onClick={(event) => { event.stopPropagation(); void copyEvidence(); }}><Clipboard size={14} /></button><button className={isConfirmingDelete ? "confirm-delete" : "icon-button danger"} title="Delete evidence" onClick={(event) => void deleteEvidenceAfterConfirm(event)}>{isConfirmingDelete ? "Confirm" : <Trash2 size={14} />}</button></div></div>
     {attachmentUrl && attachment && isImageAttachment ? <img className="attachment-preview" src={attachmentUrl} alt={attachment.name} /> : null}
     {attachmentUrl && attachment && !isImageAttachment ? <a className="attachment-link" href={attachmentUrl} download={attachment.name}>{attachment.name}</a> : null}
     <pre>{item.contentText || (item.attachmentId ? "Attachment stored locally" : "")}</pre>
@@ -256,18 +239,68 @@ function EvidenceCard({ item }: { item: Evidence }) {
   </article>;
 }
 
-function RightPanel({ incidentId, timeline, entities, tags }: { incidentId: string; timeline: Snapshot["timeline_events"]; entities: Snapshot["entities"]; tags: Snapshot["tags"] }) {
+function EvidenceDetail({ item, snapshot, onClose }: { item: Evidence; snapshot: Snapshot; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [isReplaying, setIsReplaying] = useState(false);
+  const parserOutputs = snapshot.parserOutputs.filter((output) => output.evidenceId === item.id);
+  const timeline = snapshot.timelineEvents.filter((event) => event.sourceEvidenceId === item.id);
+  const entities = snapshot.entities.filter((entity) => entity.sourceEvidenceId === item.id);
+  const { data: attachment } = useQuery({ queryKey: ["attachment", item.id], queryFn: () => loadAttachment(item.id), enabled: Boolean(item.attachmentId) });
+  const attachmentUrl = attachment ? `data:${attachment.mimeType};base64,${attachment.base64}` : null;
+  const canReplay = Boolean(item.contentText);
+  async function handleReplay() {
+    if (!canReplay || isReplaying) return;
+    setIsReplaying(true);
+    try {
+      await clearEvidenceParsers(item.id);
+      const outputs = await parseEvidence(item);
+      for (const output of outputs) {
+        const derivedTimeline = deriveTimelineEvents(item.incidentId, output);
+        const derivedEntities = deriveEntities(item.incidentId, output);
+        await saveParserOutput({ id: output.id, evidenceId: output.evidenceId, parserName: output.parserName, parserVersion: output.parserVersion, output: output.output, timelineEvents: derivedTimeline, entities: derivedEntities });
+      }
+      queryClient.invalidateQueries({ queryKey: ["snapshot"] });
+    } catch (caught) {
+      console.error("Replay failed:", caught);
+    } finally {
+      setIsReplaying(false);
+    }
+  }
+  return <aside className="detail-drawer">
+    <div className="detail-header"><div><h2>Evidence detail</h2><strong>{item.kind} from {item.source}</strong></div><div className="detail-actions">{canReplay && <button className="icon-button" title="Re-run parser" disabled={isReplaying} onClick={() => void handleReplay()}>{isReplaying ? "..." : "↻"}</button>}<button className="icon-button" title="Close detail" onClick={onClose}><X size={14} /></button></div></div>
+    {attachmentUrl && attachment?.mimeType.startsWith("image/") ? <img className="attachment-preview" src={attachmentUrl} alt={attachment.name} /> : null}
+    {attachmentUrl && attachment && !attachment.mimeType.startsWith("image/") ? <a className="attachment-link" href={attachmentUrl} download={attachment.name}>{attachment.name}</a> : null}
+    <section><h3>Raw evidence</h3><pre>{item.contentText || (item.attachmentId ? "Attachment stored locally" : "")}</pre></section>
+    <section><h3>Parser outputs</h3>{parserOutputs.length ? parserOutputs.map((output) => <details key={output.id} open><summary>{output.parserName} v{output.parserVersion}</summary><pre>{JSON.stringify(output.output, null, 2)}</pre></details>) : <p className="muted">No parser output for this evidence.</p>}</section>
+    <section><h3>Derived timeline</h3>{timeline.length ? timeline.map((event) => <div className="detail-row" key={event.id}><strong>{event.title}</strong><span>{new Date(event.timestamp).toLocaleString()} · {Math.round(event.confidence * 100)}%</span></div>) : <p className="muted">No timeline events derived from this evidence.</p>}</section>
+    <section><h3>Derived entities</h3>{entities.length ? entities.map((entity) => <span className="pill" key={entity.id}>{entity.type}: {entity.name}</span>) : <p className="muted">No entities derived from this evidence.</p>}</section>
+    <section><h3>Metadata</h3><pre>{JSON.stringify({ id: item.id, contentHash: item.contentHash, createdAt: item.createdAt, metadata: item.metadata }, null, 2)}</pre></section>
+  </aside>;
+}
+
+function sanitizeFtsQuery(value: string) {
+  return value.trim().split(/\s+/).map((term) => term.replace(/[^\p{L}\p{N}_-]/gu, "")).filter(Boolean).join(" ");
+}
+
+function RightPanel({ incidentId, timeline, entities, tags, onSelectEvidence }: { incidentId: string; timeline: Snapshot["timelineEvents"]; entities: Snapshot["entities"]; tags: Snapshot["tags"]; onSelectEvidence: (id: string) => void }) {
   const queryClient = useQueryClient();
   const [tag, setTag] = useState("");
   const [query, setQuery] = useState("");
-  const { data: results = [] } = useQuery({ queryKey: ["search", incidentId, query], queryFn: () => query.trim() ? invoke<SearchResult[]>("search", { incidentId, query }) : Promise.resolve([]), enabled: Boolean(query.trim()) });
-  const addTag = useMutation({ mutationFn: () => invoke("add_tag", { incidentId, name: tag }), onSuccess: () => { setTag(""); queryClient.invalidateQueries({ queryKey: ["snapshot"] }); } });
+  const safeQuery = sanitizeFtsQuery(query);
+  const { data: results = [], error: searchError } = useQuery<SearchResult[]>({ queryKey: ["search", incidentId, safeQuery], queryFn: () => safeQuery ? search(incidentId, safeQuery) : Promise.resolve([]), enabled: Boolean(safeQuery) });
+  const addTagMutation = useMutation({ mutationFn: () => addTag(incidentId, tag), onSuccess: () => { setTag(""); queryClient.invalidateQueries({ queryKey: ["snapshot"] }); } });
+  const deleteTagMutation = useMutation({ mutationFn: deleteTag, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["snapshot"] }); } });
   const groupedEntities = useMemo(() => entities.slice(0, 20), [entities]);
+  function openSearchResult(result: SearchResult) {
+    if (result.kind === "evidence") onSelectEvidence(result.refId);
+    if (result.kind === "timeline") onSelectEvidence(timeline.find((event) => event.id === result.refId)?.sourceEvidenceId ?? "");
+    if (result.kind === "entity") onSelectEvidence(entities.find((entity) => entity.id === result.refId)?.sourceEvidenceId ?? "");
+  }
   return <aside className="right">
-    <section className="panel"><h2><Search size={16} /> Search</h2><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search evidence, events, entities" />{results.map((result) => <div className="result" key={`${result.kind}-${result.refId}`}><strong>{result.kind}: {result.title}</strong><span dangerouslySetInnerHTML={{ __html: result.snippet }} /></div>)}</section>
-    <section className="panel"><h2>Timeline</h2>{timeline.map((event) => <div className="event" key={event.id}><time>{new Date(event.timestamp).toLocaleString()}</time><strong>{event.title}</strong><span>{Math.round(event.confidence * 100)}% · source {event.source_evidence_id?.slice(0, 8)}</span></div>)}</section>
-    <section className="panel"><h2>Entities</h2>{groupedEntities.map((entity) => <span className="pill" key={entity.id}>{entity.entity_type}: {entity.name}</span>)}</section>
-    <section className="panel"><h2><Tags size={16} /> Tags</h2><div className="tag-input"><input value={tag} onChange={(event) => setTag(event.target.value)} placeholder="Add tag" /><button onClick={() => addTag.mutate()}>Add</button></div>{tags.map((item) => <span className="pill" key={item.id}>{item.name}</span>)}</section>
+    <section className="panel"><h2><Search size={16} /> Search</h2><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search evidence, events, entities" />{query.trim() && !safeQuery ? <p className="muted">Use letters or numbers to search.</p> : null}{searchError ? <p className="error">Search failed: {String(searchError)}</p> : null}{safeQuery && results.length === 0 && !searchError ? <p className="muted">No results.</p> : null}{results.map((result) => <button className="result" key={`${result.kind}-${result.refId}`} onClick={() => openSearchResult(result)}><strong>{result.kind}: {result.title}</strong><span dangerouslySetInnerHTML={{ __html: result.snippet }} /></button>)}</section>
+    <section className="panel timeline-panel"><h2>Timeline</h2><div className="timeline-list">{timeline.length ? timeline.map((event) => <button className="event" key={event.id} onClick={() => event.sourceEvidenceId && onSelectEvidence(event.sourceEvidenceId)}><time>{new Date(event.timestamp).toLocaleString()}</time><strong>{event.title}</strong><span>{Math.round(event.confidence * 100)}% · source {event.sourceEvidenceId?.slice(0, 8)}</span></button>) : <p className="muted">No timeline events yet. Atlas only adds derived events when parsers find incident signals such as timestamps, deploys, errors, timeouts, or 5xx statuses.</p>}</div></section>
+    <section className="panel"><h2>Entities</h2>{groupedEntities.length ? groupedEntities.map((entity) => entity.sourceEvidenceId ? <button className="pill entity-link" key={entity.id} title="Open source evidence" onClick={() => onSelectEvidence(entity.sourceEvidenceId!)}>{entity.type}: {entity.name}</button> : <span className="pill" key={entity.id}>{entity.type}: {entity.name}</span>) : <p className="muted">No entities found yet. Try evidence with service names, HTTP statuses, deploy refs, or Kubernetes signals.</p>}</section>
+    <section className="panel"><h2><Tags size={16} /> Tags</h2><div className="tag-input"><input value={tag} onChange={(event) => setTag(event.target.value)} placeholder="Add tag" /><button onClick={() => addTagMutation.mutate()} disabled={!tag.trim()}>Add</button></div>{tags.length ? tags.map((item) => <span className="pill tag-pill" key={item.id}>{item.name}<button title={`Remove ${item.name}`} onClick={() => deleteTagMutation.mutate(item.id)}>×</button></span>) : <p className="muted">No tags yet.</p>}</section>
   </aside>;
 }
 
