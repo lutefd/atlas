@@ -136,9 +136,7 @@ fn delete_evidence(state: tauri::State<AppState>, evidence_id: String) -> Result
     let evidence_info = conn.query_row("SELECT incident_id FROM evidence WHERE id = ?1", params![evidence_id], |row| row.get::<_, String>(0)).ok();
     let Some(incident_id) = evidence_info else { return Ok(()); };
     let tx = conn.transaction().map_err(|error| error.to_string())?;
-    tx.execute("DELETE FROM search_index WHERE ref_id IN (SELECT id FROM timeline_events WHERE source_evidence_id = ?1)", params![evidence_id]).map_err(|error| error.to_string())?;
-    tx.execute("DELETE FROM search_index WHERE ref_id IN (SELECT id FROM entities WHERE source_evidence_id = ?1)", params![evidence_id]).map_err(|error| error.to_string())?;
-    tx.execute("DELETE FROM search_index WHERE ref_id = ?1", params![evidence_id]).map_err(|error| error.to_string())?;
+    tx.execute("DELETE FROM search_index WHERE incident_id = ?1", params![incident_id]).map_err(|error| error.to_string())?;
     tx.execute("DELETE FROM timeline_events WHERE source_evidence_id = ?1", params![evidence_id]).map_err(|error| error.to_string())?;
     tx.execute("DELETE FROM relations WHERE source_evidence_id = ?1", params![evidence_id]).map_err(|error| error.to_string())?;
     tx.execute("DELETE FROM entities WHERE source_evidence_id = ?1", params![evidence_id]).map_err(|error| error.to_string())?;
@@ -146,6 +144,7 @@ fn delete_evidence(state: tauri::State<AppState>, evidence_id: String) -> Result
     tx.execute("DELETE FROM evidence_tags WHERE evidence_id = ?1", params![evidence_id]).map_err(|error| error.to_string())?;
     tx.execute("DELETE FROM attachments WHERE evidence_id = ?1", params![evidence_id]).map_err(|error| error.to_string())?;
     tx.execute("DELETE FROM evidence WHERE id = ?1", params![evidence_id]).map_err(|error| error.to_string())?;
+    rebuild_search_index(&tx, &incident_id)?;
     tx.commit().map_err(|error| error.to_string())?;
     remove_dir_if_exists(&state.attachments_dir.join(incident_id).join(evidence_id))?;
     Ok(())
@@ -170,6 +169,28 @@ fn delete_incident(state: tauri::State<AppState>, incident_id: String) -> Result
     tx.execute("DELETE FROM incidents WHERE id = ?1", params![incident_id]).map_err(|error| error.to_string())?;
     tx.commit().map_err(|error| error.to_string())?;
     remove_dir_if_exists(&state.attachments_dir.join(incident_id))?;
+    Ok(())
+}
+
+fn rebuild_search_index(conn: &Connection, incident_id: &str) -> Result<(), String> {
+    let mut evidence_stmt = conn.prepare("SELECT id, source, content_text FROM evidence WHERE incident_id = ?1").map_err(|error| error.to_string())?;
+    let evidence_rows = evidence_stmt.query_map(params![incident_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?))).map_err(|error| error.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    for (id, source, content_text) in evidence_rows {
+        conn.execute("INSERT INTO search_index(kind, ref_id, incident_id, title, body) VALUES ('evidence', ?1, ?2, ?3, ?4)", params![id, incident_id, source, content_text]).map_err(|error| error.to_string())?;
+    }
+
+    let mut timeline_stmt = conn.prepare("SELECT id, title, description FROM timeline_events WHERE incident_id = ?1").map_err(|error| error.to_string())?;
+    let timeline_rows = timeline_stmt.query_map(params![incident_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))).map_err(|error| error.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    for (id, title, description) in timeline_rows {
+        conn.execute("INSERT INTO search_index(kind, ref_id, incident_id, title, body) VALUES ('timeline', ?1, ?2, ?3, ?4)", params![id, incident_id, title, description]).map_err(|error| error.to_string())?;
+    }
+
+    let mut entity_stmt = conn.prepare("SELECT id, name FROM entities WHERE incident_id = ?1").map_err(|error| error.to_string())?;
+    let entity_rows = entity_stmt.query_map(params![incident_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))).map_err(|error| error.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    for (id, name) in entity_rows {
+        conn.execute("INSERT INTO search_index(kind, ref_id, incident_id, title, body) VALUES ('entity', ?1, ?2, ?3, '')", params![id, incident_id, name]).map_err(|error| error.to_string())?;
+    }
+
     Ok(())
 }
 
