@@ -26,7 +26,10 @@ struct Entity { id: String, incident_id: String, entity_type: String, name: Stri
 struct Tag { id: String, incident_id: String, name: String, created_at: String }
 
 #[derive(Serialize)]
-struct Snapshot { incidents: Vec<Incident>, evidence: Vec<Evidence>, timeline_events: Vec<TimelineEvent>, entities: Vec<Entity>, tags: Vec<Tag> }
+struct ParserOutput { id: String, evidence_id: String, parser_name: String, parser_version: String, output_json: String, created_at: String }
+
+#[derive(Serialize)]
+struct Snapshot { incidents: Vec<Incident>, evidence: Vec<Evidence>, timeline_events: Vec<TimelineEvent>, entities: Vec<Entity>, tags: Vec<Tag>, parser_outputs: Vec<ParserOutput> }
 
 #[derive(Deserialize)]
 struct CreateEvidenceInput { incident_id: String, kind: String, source: String, content_text: Option<String>, metadata_json: Option<String>, attachment_name: Option<String>, attachment_mime_type: Option<String>, attachment_base64: Option<String> }
@@ -81,6 +84,15 @@ fn create_incident(state: tauri::State<AppState>, title: String) -> Result<Incid
 }
 
 #[tauri::command]
+fn rename_incident(state: tauri::State<AppState>, incident_id: String, title: String) -> Result<Incident, String> {
+    let _guard = state.lock.lock().map_err(|error| error.to_string())?;
+    let conn = open(&state.db_path)?;
+    let updated_at = now();
+    conn.execute("UPDATE incidents SET title = ?1, updated_at = ?2 WHERE id = ?3", params![title.trim(), &updated_at, &incident_id]).map_err(|error| error.to_string())?;
+    conn.query_row("SELECT id, title, created_at, updated_at FROM incidents WHERE id = ?1", params![&incident_id], |row| Ok(Incident { id: row.get(0)?, title: row.get(1)?, created_at: row.get(2)?, updated_at: row.get(3)? })).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn add_evidence(state: tauri::State<AppState>, input: CreateEvidenceInput) -> Result<Evidence, String> {
     let _guard = state.lock.lock().map_err(|error| error.to_string())?;
     let conn = open(&state.db_path)?;
@@ -126,6 +138,31 @@ fn save_parser_output(state: tauri::State<AppState>, input: ParserOutputInput) -
 fn add_tag(state: tauri::State<AppState>, incident_id: String, name: String) -> Result<(), String> {
     let _guard = state.lock.lock().map_err(|error| error.to_string())?;
     open(&state.db_path)?.execute("INSERT OR IGNORE INTO tags VALUES (?1, ?2, ?3, ?4)", params![id(), incident_id, name.trim(), now()]).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_tag(state: tauri::State<AppState>, tag_id: String) -> Result<(), String> {
+    let _guard = state.lock.lock().map_err(|error| error.to_string())?;
+    let conn = open(&state.db_path)?;
+    conn.execute("DELETE FROM evidence_tags WHERE tag_id = ?1", params![tag_id]).map_err(|error| error.to_string())?;
+    conn.execute("DELETE FROM tags WHERE id = ?1", params![tag_id]).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn clear_evidence_parsers(state: tauri::State<AppState>, evidence_id: String) -> Result<(), String> {
+    let _guard = state.lock.lock().map_err(|error| error.to_string())?;
+    let mut conn = open(&state.db_path)?;
+    let evidence_info = conn.query_row("SELECT incident_id FROM evidence WHERE id = ?1", params![evidence_id], |row| row.get::<_, String>(0)).ok();
+    let Some(incident_id) = evidence_info else { return Ok(()); };
+    let tx = conn.transaction().map_err(|error| error.to_string())?;
+    tx.execute("DELETE FROM search_index WHERE incident_id = ?1", params![&incident_id]).map_err(|error| error.to_string())?;
+    tx.execute("DELETE FROM timeline_events WHERE source_evidence_id = ?1", params![&evidence_id]).map_err(|error| error.to_string())?;
+    tx.execute("DELETE FROM entities WHERE source_evidence_id = ?1", params![&evidence_id]).map_err(|error| error.to_string())?;
+    tx.execute("DELETE FROM parser_outputs WHERE evidence_id = ?1", params![&evidence_id]).map_err(|error| error.to_string())?;
+    rebuild_search_index(&tx, &incident_id)?;
+    tx.commit().map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -202,7 +239,8 @@ fn load_snapshot(state: tauri::State<AppState>) -> Result<Snapshot, String> {
     let timeline_events = conn.prepare("SELECT id,incident_id,timestamp,title,description,confidence,source_evidence_id,source_parser_output_id,created_at FROM timeline_events ORDER BY timestamp ASC").map_err(|e| e.to_string())?.query_map([], |r| Ok(TimelineEvent { id: r.get(0)?, incident_id: r.get(1)?, timestamp: r.get(2)?, title: r.get(3)?, description: r.get(4)?, confidence: r.get(5)?, source_evidence_id: r.get(6)?, source_parser_output_id: r.get(7)?, created_at: r.get(8)? })).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
     let entities = conn.prepare("SELECT id,incident_id,type,name,confidence,source_evidence_id,source_parser_output_id,created_at FROM entities ORDER BY created_at DESC").map_err(|e| e.to_string())?.query_map([], |r| Ok(Entity { id: r.get(0)?, incident_id: r.get(1)?, entity_type: r.get(2)?, name: r.get(3)?, confidence: r.get(4)?, source_evidence_id: r.get(5)?, source_parser_output_id: r.get(6)?, created_at: r.get(7)? })).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
     let tags = conn.prepare("SELECT id,incident_id,name,created_at FROM tags ORDER BY name ASC").map_err(|e| e.to_string())?.query_map([], |r| Ok(Tag { id: r.get(0)?, incident_id: r.get(1)?, name: r.get(2)?, created_at: r.get(3)? })).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
-    Ok(Snapshot { incidents, evidence, timeline_events, entities, tags })
+    let parser_outputs = conn.prepare("SELECT id,evidence_id,parser_name,parser_version,output_json,created_at FROM parser_outputs ORDER BY created_at DESC").map_err(|e| e.to_string())?.query_map([], |r| Ok(ParserOutput { id: r.get(0)?, evidence_id: r.get(1)?, parser_name: r.get(2)?, parser_version: r.get(3)?, output_json: r.get(4)?, created_at: r.get(5)? })).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    Ok(Snapshot { incidents, evidence, timeline_events, entities, tags, parser_outputs })
 }
 
 #[tauri::command]
@@ -238,7 +276,7 @@ fn main() {
             app.manage(AppState { db_path, attachments_dir: app_dir.join("attachments"), lock: Mutex::new(()) });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![create_incident, add_evidence, save_parser_output, add_tag, delete_evidence, delete_incident, load_snapshot, search, load_attachment])
+        .invoke_handler(tauri::generate_handler![create_incident, rename_incident, add_evidence, save_parser_output, add_tag, delete_tag, clear_evidence_parsers, delete_evidence, delete_incident, load_snapshot, search, load_attachment])
         .run(tauri::generate_context!())
         .expect("failed to run atlas");
 }
