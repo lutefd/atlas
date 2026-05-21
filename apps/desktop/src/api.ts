@@ -101,6 +101,8 @@ export async function updateJob(input: { id: string; status: string; errorText?:
 
 export async function clearEvidenceParsers(evidenceId: string) { await invoke("clear_evidence_parsers", { evidenceId }); }
 export async function deleteIncident(incidentId: string) { await invoke("delete_incident", { incidentId }); }
+export async function exportIncident(incidentId: string) { return invoke<string>("export_incident", { incidentId }); }
+export async function importIncident(exportPath: string) { await invoke("import_incident", { exportPath }); }
 export async function deleteEvidence(evidenceId: string) { await invoke("delete_evidence", { evidenceId }); }
 export async function addTag(incidentId: string, name: string) { await invoke("add_tag", { incidentId, name }); }
 export async function deleteTag(tagId: string) { await invoke("delete_tag", { tagId }); }

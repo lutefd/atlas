@@ -70,6 +70,22 @@ fn remove_dir_if_exists(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn write_json(path: &Path, value: &serde_json::Value) -> Result<(), String> {
+    fs::write(path, serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?).map_err(|error| error.to_string())
+}
+
+fn read_json(path: &Path) -> Result<serde_json::Value, String> {
+    serde_json::from_slice(&fs::read(path).map_err(|error| error.to_string())?).map_err(|error| error.to_string())
+}
+
+fn json_string(value: &serde_json::Value, key: &str) -> Result<String, String> {
+    value.get(key).and_then(|field| field.as_str()).map(str::to_string).ok_or_else(|| format!("Missing {key}"))
+}
+
+fn json_optional_string(value: &serde_json::Value, key: &str) -> Option<String> {
+    value.get(key).and_then(|field| field.as_str()).map(str::to_string)
+}
+
 fn migrate(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(r#"
         PRAGMA journal_mode = WAL;
@@ -340,6 +356,88 @@ fn load_attachment(state: tauri::State<AppState>, evidence_id: String) -> Result
 }
 
 #[tauri::command]
+fn export_incident(state: tauri::State<AppState>, incident_id: String) -> Result<String, String> {
+    let _guard = state.lock.lock().map_err(|error| error.to_string())?;
+    let conn = open(&state.db_path)?;
+    let export_dir = state.db_path.parent().ok_or_else(|| "Missing app data directory".to_string())?.join("exports").join(&incident_id);
+    remove_dir_if_exists(&export_dir)?;
+    fs::create_dir_all(export_dir.join("attachments")).map_err(|error| error.to_string())?;
+
+    let incident = conn.query_row("SELECT id,title,created_at,updated_at FROM incidents WHERE id = ?1", params![&incident_id], |row| Ok(serde_json::json!({ "id": row.get::<_, String>(0)?, "title": row.get::<_, String>(1)?, "created_at": row.get::<_, String>(2)?, "updated_at": row.get::<_, String>(3)? }))).map_err(|error| error.to_string())?;
+    write_json(&export_dir.join("incident.json"), &incident)?;
+
+    let evidence = conn.prepare("SELECT id,incident_id,kind,source,content_text,content_hash,created_at,metadata_json,attachment_id FROM evidence WHERE incident_id = ?1 ORDER BY created_at ASC").map_err(|e| e.to_string())?.query_map(params![&incident_id], |row| Ok(serde_json::json!({ "id": row.get::<_, String>(0)?, "incident_id": row.get::<_, String>(1)?, "kind": row.get::<_, String>(2)?, "source": row.get::<_, String>(3)?, "content_text": row.get::<_, Option<String>>(4)?, "content_hash": row.get::<_, String>(5)?, "created_at": row.get::<_, String>(6)?, "metadata_json": row.get::<_, String>(7)?, "attachment_id": row.get::<_, Option<String>>(8)? }))).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    write_json(&export_dir.join("evidence.json"), &serde_json::Value::Array(evidence))?;
+
+    let timeline = conn.prepare("SELECT id,incident_id,timestamp,title,description,confidence,source_evidence_id,source_parser_output_id,created_at FROM timeline_events WHERE incident_id = ?1 ORDER BY timestamp ASC").map_err(|e| e.to_string())?.query_map(params![&incident_id], |row| Ok(serde_json::json!({ "id": row.get::<_, String>(0)?, "incident_id": row.get::<_, String>(1)?, "timestamp": row.get::<_, String>(2)?, "title": row.get::<_, String>(3)?, "description": row.get::<_, String>(4)?, "confidence": row.get::<_, f64>(5)?, "source_evidence_id": row.get::<_, Option<String>>(6)?, "source_parser_output_id": row.get::<_, Option<String>>(7)?, "created_at": row.get::<_, String>(8)? }))).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    write_json(&export_dir.join("timeline.json"), &serde_json::Value::Array(timeline))?;
+
+    let entities = conn.prepare("SELECT id,incident_id,type,name,confidence,source_evidence_id,source_parser_output_id,created_at FROM entities WHERE incident_id = ?1 ORDER BY created_at ASC").map_err(|e| e.to_string())?.query_map(params![&incident_id], |row| Ok(serde_json::json!({ "id": row.get::<_, String>(0)?, "incident_id": row.get::<_, String>(1)?, "type": row.get::<_, String>(2)?, "name": row.get::<_, String>(3)?, "confidence": row.get::<_, f64>(4)?, "source_evidence_id": row.get::<_, Option<String>>(5)?, "source_parser_output_id": row.get::<_, Option<String>>(6)?, "created_at": row.get::<_, String>(7)? }))).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    write_json(&export_dir.join("entities.json"), &serde_json::Value::Array(entities))?;
+
+    let tags = conn.prepare("SELECT id,incident_id,name,created_at FROM tags WHERE incident_id = ?1 ORDER BY name ASC").map_err(|e| e.to_string())?.query_map(params![&incident_id], |row| Ok(serde_json::json!({ "id": row.get::<_, String>(0)?, "incident_id": row.get::<_, String>(1)?, "name": row.get::<_, String>(2)?, "created_at": row.get::<_, String>(3)? }))).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    write_json(&export_dir.join("tags.json"), &serde_json::Value::Array(tags))?;
+
+    let parser_outputs = conn.prepare("SELECT id,evidence_id,parser_name,parser_version,output_json,created_at FROM parser_outputs WHERE evidence_id IN (SELECT id FROM evidence WHERE incident_id = ?1) ORDER BY created_at ASC").map_err(|e| e.to_string())?.query_map(params![&incident_id], |row| Ok(serde_json::json!({ "id": row.get::<_, String>(0)?, "evidence_id": row.get::<_, String>(1)?, "parser_name": row.get::<_, String>(2)?, "parser_version": row.get::<_, String>(3)?, "output_json": row.get::<_, String>(4)?, "created_at": row.get::<_, String>(5)? }))).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    write_json(&export_dir.join("parser_outputs.json"), &serde_json::Value::Array(parser_outputs))?;
+
+    let attachments = conn.prepare("SELECT id,evidence_id,path,mime_type,size_bytes,created_at FROM attachments WHERE evidence_id IN (SELECT id FROM evidence WHERE incident_id = ?1)").map_err(|e| e.to_string())?.query_map(params![&incident_id], |row| {
+        let path: String = row.get(2)?;
+        let file_name = PathBuf::from(&path).file_name().and_then(|value| value.to_str()).unwrap_or("attachment").to_string();
+        Ok((path, file_name.clone(), serde_json::json!({ "id": row.get::<_, String>(0)?, "evidence_id": row.get::<_, String>(1)?, "file_name": file_name, "mime_type": row.get::<_, Option<String>>(3)?, "size_bytes": row.get::<_, i64>(4)?, "created_at": row.get::<_, String>(5)? })))
+    }).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    let mut attachment_json = Vec::new();
+    for (source_path, file_name, value) in attachments {
+        fs::copy(&source_path, export_dir.join("attachments").join(file_name)).map_err(|error| error.to_string())?;
+        attachment_json.push(value);
+    }
+    write_json(&export_dir.join("attachments.json"), &serde_json::Value::Array(attachment_json))?;
+    Ok(export_dir.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn import_incident(state: tauri::State<AppState>, export_path: String) -> Result<(), String> {
+    let _guard = state.lock.lock().map_err(|error| error.to_string())?;
+    let export_dir = PathBuf::from(export_path);
+    let incident = read_json(&export_dir.join("incident.json"))?;
+    let incident_id = json_string(&incident, "id")?;
+    let mut conn = open(&state.db_path)?;
+    let exists = conn.query_row("SELECT 1 FROM incidents WHERE id = ?1", params![&incident_id], |_| Ok(())).is_ok();
+    if exists { return Err(format!("Incident {incident_id} already exists")); }
+
+    let tx = conn.transaction().map_err(|error| error.to_string())?;
+    tx.execute("INSERT INTO incidents VALUES (?1, ?2, ?3, ?4)", params![incident_id, json_string(&incident, "title")?, json_string(&incident, "created_at")?, json_string(&incident, "updated_at")?]).map_err(|error| error.to_string())?;
+
+    for row in read_json(&export_dir.join("evidence.json"))?.as_array().cloned().unwrap_or_default() {
+        tx.execute("INSERT INTO evidence VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)", params![json_string(&row, "id")?, json_string(&row, "incident_id")?, json_string(&row, "kind")?, json_string(&row, "source")?, json_optional_string(&row, "content_text"), json_string(&row, "content_hash")?, json_string(&row, "created_at")?, json_string(&row, "metadata_json")?, json_optional_string(&row, "attachment_id")]).map_err(|error| error.to_string())?;
+    }
+    for row in read_json(&export_dir.join("parser_outputs.json"))?.as_array().cloned().unwrap_or_default() {
+        tx.execute("INSERT INTO parser_outputs VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![json_string(&row, "id")?, json_string(&row, "evidence_id")?, json_string(&row, "parser_name")?, json_string(&row, "parser_version")?, json_string(&row, "output_json")?, json_string(&row, "created_at")?]).map_err(|error| error.to_string())?;
+    }
+    for row in read_json(&export_dir.join("timeline.json"))?.as_array().cloned().unwrap_or_default() {
+        tx.execute("INSERT INTO timeline_events VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)", params![json_string(&row, "id")?, json_string(&row, "incident_id")?, json_string(&row, "timestamp")?, json_string(&row, "title")?, json_string(&row, "description")?, row.get("confidence").and_then(|value| value.as_f64()).unwrap_or(1.0), json_optional_string(&row, "source_evidence_id"), json_optional_string(&row, "source_parser_output_id"), json_string(&row, "created_at")?]).map_err(|error| error.to_string())?;
+    }
+    for row in read_json(&export_dir.join("entities.json"))?.as_array().cloned().unwrap_or_default() {
+        tx.execute("INSERT INTO entities VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)", params![json_string(&row, "id")?, json_string(&row, "incident_id")?, json_string(&row, "type")?, json_string(&row, "name")?, row.get("confidence").and_then(|value| value.as_f64()).unwrap_or(1.0), json_optional_string(&row, "source_evidence_id"), json_optional_string(&row, "source_parser_output_id"), json_string(&row, "created_at")?]).map_err(|error| error.to_string())?;
+    }
+    for row in read_json(&export_dir.join("tags.json"))?.as_array().cloned().unwrap_or_default() {
+        tx.execute("INSERT OR IGNORE INTO tags VALUES (?1, ?2, ?3, ?4)", params![json_string(&row, "id")?, json_string(&row, "incident_id")?, json_string(&row, "name")?, json_string(&row, "created_at")?]).map_err(|error| error.to_string())?;
+    }
+    for row in read_json(&export_dir.join("attachments.json"))?.as_array().cloned().unwrap_or_default() {
+        let evidence_id = json_string(&row, "evidence_id")?;
+        let file_name = json_string(&row, "file_name")?;
+        let target_dir = state.attachments_dir.join(&incident_id).join(&evidence_id);
+        fs::create_dir_all(&target_dir).map_err(|error| error.to_string())?;
+        let target_path = target_dir.join(&file_name);
+        fs::copy(export_dir.join("attachments").join(&file_name), &target_path).map_err(|error| error.to_string())?;
+        tx.execute("INSERT INTO attachments VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![json_string(&row, "id")?, evidence_id, target_path.to_string_lossy(), json_optional_string(&row, "mime_type"), row.get("size_bytes").and_then(|value| value.as_i64()).unwrap_or(0), json_string(&row, "created_at")?]).map_err(|error| error.to_string())?;
+    }
+    rebuild_search_index(&tx, &incident_id)?;
+    tx.commit().map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 fn open_attachment(state: tauri::State<AppState>, evidence_id: String) -> Result<(), String> {
     let conn = open(&state.db_path)?;
     let path = conn.query_row("SELECT path FROM attachments WHERE evidence_id = ?1 LIMIT 1", params![evidence_id], |row| row.get::<_, String>(0)).map_err(|error| error.to_string())?;
@@ -366,7 +464,7 @@ fn main() {
             app.manage(AppState { db_path, attachments_dir: app_dir.join("attachments"), lock: Mutex::new(()) });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![create_incident, rename_incident, add_evidence, save_parser_output, create_job, update_job, create_manual_timeline_event, update_manual_timeline_event, delete_manual_timeline_event, add_tag, delete_tag, clear_evidence_parsers, delete_evidence, delete_incident, load_snapshot, search, load_attachment, open_attachment, reveal_attachment])
+        .invoke_handler(tauri::generate_handler![create_incident, rename_incident, add_evidence, save_parser_output, create_job, update_job, create_manual_timeline_event, update_manual_timeline_event, delete_manual_timeline_event, add_tag, delete_tag, clear_evidence_parsers, delete_evidence, delete_incident, load_snapshot, search, load_attachment, open_attachment, reveal_attachment, export_incident, import_incident])
         .run(tauri::generate_context!())
         .expect("failed to run atlas");
 }
