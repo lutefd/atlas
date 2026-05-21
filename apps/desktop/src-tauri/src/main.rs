@@ -207,6 +207,8 @@ fn save_parser_output(state: tauri::State<AppState>, input: ParserOutputInput) -
     let _guard = state.lock.lock().map_err(|error| error.to_string())?;
     let conn = open(&state.db_path)?;
     conn.execute("INSERT INTO parser_outputs VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![input.id, input.evidence_id, input.parser_name, input.parser_version, input.output_json, now()]).map_err(|error| error.to_string())?;
+    let incident_id = conn.query_row("SELECT incident_id FROM evidence WHERE id = ?1", params![input.evidence_id], |row| row.get::<_, String>(0)).map_err(|error| error.to_string())?;
+    conn.execute("INSERT INTO search_index(kind, ref_id, incident_id, title, body) VALUES ('parser_output', ?1, ?2, ?3, ?4)", params![input.evidence_id, incident_id, input.parser_name, input.output_json]).map_err(|error| error.to_string())?;
     let timeline: Vec<DerivedTimelineInput> = serde_json::from_str(&input.timeline_events_json).map_err(|error| error.to_string())?;
     for event in timeline {
         conn.execute("INSERT INTO timeline_events VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)", params![event.id, event.incident_id, event.timestamp, event.title, event.description, event.confidence, event.source_evidence_id, event.source_parser_output_id, now()]).map_err(|error| error.to_string())?;
@@ -315,6 +317,12 @@ fn rebuild_search_index(conn: &Connection, incident_id: &str) -> Result<(), Stri
     let entity_rows = entity_stmt.query_map(params![incident_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))).map_err(|error| error.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
     for (id, entity_type, name) in entity_rows {
         conn.execute("INSERT INTO search_index(kind, ref_id, incident_id, title, body) VALUES ('entity', ?1, ?2, ?3, ?4)", params![id, incident_id, name, entity_type]).map_err(|error| error.to_string())?;
+    }
+
+    let mut parser_stmt = conn.prepare("SELECT evidence_id, parser_name, output_json FROM parser_outputs WHERE evidence_id IN (SELECT id FROM evidence WHERE incident_id = ?1)").map_err(|error| error.to_string())?;
+    let parser_rows = parser_stmt.query_map(params![incident_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))).map_err(|error| error.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    for (evidence_id, parser_name, output_json) in parser_rows {
+        conn.execute("INSERT INTO search_index(kind, ref_id, incident_id, title, body) VALUES ('parser_output', ?1, ?2, ?3, ?4)", params![evidence_id, incident_id, parser_name, output_json]).map_err(|error| error.to_string())?;
     }
 
     Ok(())
@@ -453,6 +461,17 @@ fn reveal_attachment(state: tauri::State<AppState>, evidence_id: String) -> Resu
     Ok(())
 }
 
+#[tauri::command]
+fn run_ocr(state: tauri::State<AppState>, evidence_id: String) -> Result<String, String> {
+    let conn = open(&state.db_path)?;
+    let path = conn.query_row("SELECT path FROM attachments WHERE evidence_id = ?1 LIMIT 1", params![evidence_id], |row| row.get::<_, String>(0)).map_err(|error| error.to_string())?;
+    let output = Command::new("tesseract").arg(&path).arg("stdout").output().map_err(|_| "Local OCR requires the `tesseract` command to be installed.".to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -464,7 +483,7 @@ fn main() {
             app.manage(AppState { db_path, attachments_dir: app_dir.join("attachments"), lock: Mutex::new(()) });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![create_incident, rename_incident, add_evidence, save_parser_output, create_job, update_job, create_manual_timeline_event, update_manual_timeline_event, delete_manual_timeline_event, add_tag, delete_tag, clear_evidence_parsers, delete_evidence, delete_incident, load_snapshot, search, load_attachment, open_attachment, reveal_attachment, export_incident, import_incident])
+        .invoke_handler(tauri::generate_handler![create_incident, rename_incident, add_evidence, save_parser_output, create_job, update_job, create_manual_timeline_event, update_manual_timeline_event, delete_manual_timeline_event, add_tag, delete_tag, clear_evidence_parsers, delete_evidence, delete_incident, load_snapshot, search, load_attachment, open_attachment, reveal_attachment, run_ocr, export_incident, import_incident])
         .run(tauri::generate_context!())
         .expect("failed to run atlas");
 }

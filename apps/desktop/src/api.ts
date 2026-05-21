@@ -99,7 +99,13 @@ export type AttachmentData = {
 	path: string;
 };
 export type SearchResult = {
-	kind: "evidence" | "timeline" | "entity" | "attachment" | string;
+	kind:
+		| "evidence"
+		| "timeline"
+		| "entity"
+		| "attachment"
+		| "parser_output"
+		| string;
 	refId: string;
 	title: string;
 	snippet: string;
@@ -441,4 +447,8 @@ export async function openAttachment(evidenceId: string) {
 }
 export async function revealAttachment(evidenceId: string) {
 	await invoke("reveal_attachment", { evidenceId });
+}
+
+export async function runOcr(evidenceId: string) {
+	return invoke<string>("run_ocr", { evidenceId });
 }

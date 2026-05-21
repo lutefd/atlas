@@ -44,6 +44,7 @@ import {
 	openAttachment,
 	renameIncident,
 	revealAttachment,
+	runOcr,
 	saveParserOutput,
 	search,
 	updateJob,
@@ -165,6 +166,58 @@ function getParseStatus(evidence: Evidence, snapshot: Snapshot) {
 async function replayEvidenceParsers(evidence: Evidence) {
 	await clearEvidenceParsers(evidence.id);
 	await runParsersForEvidence(evidence);
+}
+
+async function runOcrForEvidence(evidence: Evidence) {
+	const jobId = crypto.randomUUID();
+	await createJob({
+		id: jobId,
+		kind: "ocr",
+		status: "running",
+		payload: { evidenceId: evidence.id, incidentId: evidence.incidentId },
+	});
+	try {
+		const text = await runOcr(evidence.id);
+		const ocrOutput = {
+			entities: [],
+			timestamps: [],
+			events: [],
+			metrics: [],
+			references: [{ kind: "ocr_text", value: text, sourceText: text }],
+		};
+		await saveParserOutput({
+			id: crypto.randomUUID(),
+			evidenceId: evidence.id,
+			parserName: "local-ocr",
+			parserVersion: "0.1.0",
+			output: ocrOutput,
+			timelineEvents: [],
+			entities: [],
+		});
+		const ocrEvidence = { ...evidence, contentText: text };
+		const outputs = await parseEvidence(ocrEvidence);
+		for (const output of outputs) {
+			const timeline = deriveTimelineEvents(evidence.incidentId, output);
+			const entities = deriveEntities(evidence.incidentId, output);
+			await saveParserOutput({
+				id: output.id,
+				evidenceId: evidence.id,
+				parserName: `${output.parserName}-ocr`,
+				parserVersion: output.parserVersion,
+				output: output.output,
+				timelineEvents: timeline,
+				entities,
+			});
+		}
+		await updateJob({ id: jobId, status: "succeeded" });
+	} catch (caught) {
+		await updateJob({
+			id: jobId,
+			status: "failed",
+			errorText: caught instanceof Error ? caught.message : String(caught),
+		});
+		throw caught;
+	}
 }
 
 function base64ToBlob(base64: string, mimeType: string) {
@@ -908,6 +961,7 @@ function EvidenceDetail({
 }) {
 	const queryClient = useQueryClient();
 	const [isReplaying, setIsReplaying] = useState(false);
+	const [isRunningOcr, setIsRunningOcr] = useState(false);
 	const [attachmentStatus, setAttachmentStatus] = useState<string | null>(null);
 	const parserOutputs = snapshot.parserOutputs.filter(
 		(output) => output.evidenceId === item.id,
@@ -927,6 +981,7 @@ function EvidenceDetail({
 		? `data:${attachment.mimeType};base64,${attachment.base64}`
 		: null;
 	const canReplay = Boolean(item.contentText);
+	const canOcr = Boolean(attachment?.mimeType.startsWith("image/"));
 	async function handleReplay() {
 		if (!canReplay || isReplaying) return;
 		setIsReplaying(true);
@@ -939,6 +994,22 @@ function EvidenceDetail({
 			setIsReplaying(false);
 		}
 	}
+	async function handleOcr() {
+		if (!canOcr || isRunningOcr) return;
+		setIsRunningOcr(true);
+		setAttachmentStatus("Running local OCR...");
+		try {
+			await runOcrForEvidence(item);
+			setAttachmentStatus("OCR complete");
+			queryClient.invalidateQueries({ queryKey: ["snapshot"] });
+		} catch (caught) {
+			setAttachmentStatus(
+				caught instanceof Error ? caught.message : String(caught),
+			);
+		} finally {
+			setIsRunningOcr(false);
+		}
+	}
 	return (
 		<aside className="detail-drawer">
 			<div className="detail-header">
@@ -949,6 +1020,15 @@ function EvidenceDetail({
 					</strong>
 				</div>
 				<div className="detail-actions">
+					{canOcr && (
+						<button
+							className="ocr-button"
+							disabled={isRunningOcr}
+							onClick={() => void handleOcr()}
+						>
+							{isRunningOcr ? "OCR..." : "Run OCR"}
+						</button>
+					)}
 					{canReplay && (
 						<button
 							className="icon-button"
@@ -1185,7 +1265,11 @@ function RightPanel({
 		});
 	}
 	function openSearchResult(result: SearchResult) {
-		if (result.kind === "evidence" || result.kind === "attachment")
+		if (
+			result.kind === "evidence" ||
+			result.kind === "attachment" ||
+			result.kind === "parser_output"
+		)
 			onSelectEvidence(result.refId);
 		if (result.kind === "timeline")
 			onSelectEvidence(
@@ -1213,17 +1297,22 @@ function RightPanel({
 					placeholder="Search evidence, events, entities, files"
 				/>
 				<div className="search-filters">
-					{["all", "evidence", "timeline", "entity", "attachment"].map(
-						(filter) => (
-							<button
-								className={searchFilter === filter ? "active" : ""}
-								key={filter}
-								onClick={() => setSearchFilter(filter)}
-							>
-								{filter}
-							</button>
-						),
-					)}
+					{[
+						"all",
+						"evidence",
+						"timeline",
+						"entity",
+						"attachment",
+						"parser_output",
+					].map((filter) => (
+						<button
+							className={searchFilter === filter ? "active" : ""}
+							key={filter}
+							onClick={() => setSearchFilter(filter)}
+						>
+							{filter}
+						</button>
+					))}
 				</div>
 				{query.trim() && !safeQuery ? (
 					<p className="muted">Use letters or numbers to search.</p>
