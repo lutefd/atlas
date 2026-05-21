@@ -25,7 +25,7 @@ import {
 	deriveTimelineEvents,
 	parseEvidence,
 } from "@atlas/core";
-import type { Evidence, Incident } from "@atlas/shared";
+import type { Evidence, Incident, ParsedOutput } from "@atlas/shared";
 import {
 	addEvidence,
 	addTag,
@@ -38,6 +38,7 @@ import {
 	deleteManualTimelineEvent,
 	deleteTag,
 	exportIncident,
+	hasOcr,
 	importIncident,
 	loadAttachment,
 	loadSnapshot,
@@ -107,6 +108,13 @@ async function ingestEvidence(input: {
 		await runParsersForEvidence(evidence);
 	} catch (caught) {
 		console.error("Parser failed after evidence was saved:", caught);
+	}
+	if (input.file?.type.startsWith("image/") && (await hasOcr())) {
+		try {
+			await runOcrForEvidence(evidence);
+		} catch (caught) {
+			console.error("OCR failed after evidence was saved:", caught);
+		}
 	}
 }
 
@@ -178,12 +186,31 @@ async function runOcrForEvidence(evidence: Evidence) {
 	});
 	try {
 		const text = await runOcr(evidence.id);
+		if (!text.trim()) throw new Error("OCR completed but found no text.");
+		const ocrEvidence = { ...evidence, contentText: text };
+		const outputs = await parseEvidence(ocrEvidence);
+		const parsedOutput = outputs.reduce<ParsedOutput>(
+			(combined, output) => ({
+				entities: [...combined.entities, ...output.output.entities],
+				timestamps: [...combined.timestamps, ...output.output.timestamps],
+				events: [...combined.events, ...output.output.events],
+				metrics: [...combined.metrics, ...output.output.metrics],
+				references: [...combined.references, ...output.output.references],
+			}),
+			{
+				entities: [],
+				timestamps: [],
+				events: [],
+				metrics: [],
+				references: [],
+			},
+		);
 		const ocrOutput = {
-			entities: [],
-			timestamps: [],
-			events: [],
-			metrics: [],
-			references: [{ kind: "ocr_text", value: text, sourceText: text }],
+			...parsedOutput,
+			references: [
+				{ kind: "ocr_text", value: text, sourceText: text },
+				...parsedOutput.references,
+			],
 		};
 		await saveParserOutput({
 			id: crypto.randomUUID(),
@@ -194,8 +221,6 @@ async function runOcrForEvidence(evidence: Evidence) {
 			timelineEvents: [],
 			entities: [],
 		});
-		const ocrEvidence = { ...evidence, contentText: text };
-		const outputs = await parseEvidence(ocrEvidence);
 		for (const output of outputs) {
 			const timeline = deriveTimelineEvents(evidence.incidentId, output);
 			const entities = deriveEntities(evidence.incidentId, output);
@@ -685,7 +710,11 @@ function EvidenceInbox({ incidentId }: { incidentId: string }) {
 	}
 	async function addFile(file: File, source: string) {
 		setError(null);
-		setStatus("Saving attachment...");
+		setStatus(
+			file.type.startsWith("image/")
+				? "Saving screenshot and checking local OCR..."
+				: "Saving attachment...",
+		);
 		try {
 			const textContent = file.type.startsWith("text/")
 				? await file.text()
@@ -697,9 +726,11 @@ function EvidenceInbox({ incidentId }: { incidentId: string }) {
 				text: textContent,
 			});
 			setStatus(
-				textContent
-					? "Attachment saved. Parser run recorded."
-					: "Attachment saved.",
+				file.type.startsWith("image/")
+					? "Screenshot saved. OCR/parsers recorded if available."
+					: textContent
+						? "Attachment saved. Parser run recorded."
+						: "Attachment saved.",
 			);
 		} catch (caught) {
 			setError(caught instanceof Error ? caught.message : String(caught));
@@ -1065,7 +1096,16 @@ function EvidenceDetail({
 				<p className="muted">Attachment is missing or failed to load.</p>
 			) : null}
 			{attachmentStatus ? (
-				<div className="copy-status">{attachmentStatus}</div>
+				<div
+					className={
+						attachmentStatus.startsWith("Running")
+							? "ocr-status running"
+							: "copy-status"
+					}
+				>
+					{attachmentStatus.startsWith("Running") ? <span /> : null}
+					{attachmentStatus}
+				</div>
 			) : null}
 			{attachmentUrl &&
 			attachment &&

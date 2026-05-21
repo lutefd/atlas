@@ -472,6 +472,11 @@ fn run_ocr(state: tauri::State<AppState>, evidence_id: String) -> Result<String,
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+#[tauri::command]
+fn has_ocr() -> bool {
+    Command::new("tesseract").arg("--version").output().is_ok()
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -483,7 +488,7 @@ fn main() {
             app.manage(AppState { db_path, attachments_dir: app_dir.join("attachments"), lock: Mutex::new(()) });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![create_incident, rename_incident, add_evidence, save_parser_output, create_job, update_job, create_manual_timeline_event, update_manual_timeline_event, delete_manual_timeline_event, add_tag, delete_tag, clear_evidence_parsers, delete_evidence, delete_incident, load_snapshot, search, load_attachment, open_attachment, reveal_attachment, run_ocr, export_incident, import_incident])
+        .invoke_handler(tauri::generate_handler![create_incident, rename_incident, add_evidence, save_parser_output, create_job, update_job, create_manual_timeline_event, update_manual_timeline_event, delete_manual_timeline_event, add_tag, delete_tag, clear_evidence_parsers, delete_evidence, delete_incident, load_snapshot, search, load_attachment, open_attachment, reveal_attachment, run_ocr, has_ocr, export_incident, import_incident])
         .run(tauri::generate_context!())
         .expect("failed to run atlas");
 }

@@ -35,8 +35,9 @@ const rfcTimestamp =
 	/\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}\s+\d{2}:\d{2}:\d{2}\s+GMT\b/g;
 const logTimestamp =
 	/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\b/g;
+const timeOnlyTimestamp = /\b(?:[01]?\d|2[0-3]):[0-5]\d\b/g;
 const signalWords =
-	/\b(deployed|deploy|deployment|rollback|rolled back|error|exception|timeout|timed out|5\d\d|4\d\d|latency|slow|OOMKilled|CrashLoopBackOff|failed|failure|panic|restart|restarted|unavailable)\b/i;
+	/\b(deployed|deploy|deployment|rollback|rolled back|error|exception|timeout|timed out|5\d\d|4\d\d|latency|slow|OOMKilled|CrashLoopBackOff|failed|failure|panic|restart|restarted|unavailable|empty|disabled|null|success|p95|max|avg)\b/i;
 const servicePatterns = [
 	/\bservice=([a-z0-9][a-z0-9._-]+)/gi,
 	/\bapp=([a-z0-9][a-z0-9._-]+)/gi,
@@ -48,6 +49,8 @@ const httpRequestPattern =
 	/\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+((?:https?:\/\/[^\s]+|\/[^\s?#]+)(?:[^\s]*)?)/gi;
 const latencyPattern =
 	/\b(?:latency|duration|took|in)[:=\s]+(\d+(?:\.\d+)?)\s*(ms|s|sec|secs|seconds)\b/gi;
+const shortNumberPattern = /\b(\d+(?:\.\d+)?)\s*(k|m|ms|s|%)\b/gi;
+const labelPattern = /\b([a-z][a-z0-9_.-]*)\s*:\s*([a-z0-9_.\/-]+)\b/gi;
 const deployPattern =
 	/\b(?:deploy(?:ed|ment)?|release|version|image|tag)[:=\s]+([a-z0-9._/@:-]+)\b/gi;
 const shaPattern = /\b(?:commit|sha)[:=\s]+([a-f0-9]{7,40})\b/gi;
@@ -82,6 +85,12 @@ const slackChannelPattern =
 	/(?:^|\s)(?:#([a-z0-9._-]+)|<#([A-Z0-9]+)\|([^>]+)>)/gi;
 
 function parseTimestamp(raw: string): string | null {
+	if (/^(?:[01]?\d|2[0-3]):[0-5]\d$/.test(raw)) {
+		const [hours, minutes] = raw.split(":").map(Number);
+		const date = new Date();
+		date.setHours(hours, minutes, 0, 0);
+		return date.toISOString();
+	}
 	const withYear =
 		/^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}$/.test(
 			raw,
@@ -99,25 +108,29 @@ function parseTimestamp(raw: string): string | null {
 }
 
 function collectTimestamps(text: string): ParsedTimestamp[] {
-	return [isoTimestamp, unixTimestamp, rfcTimestamp, logTimestamp].flatMap(
-		(pattern) => {
-			pattern.lastIndex = 0;
-			return Array.from(text.matchAll(pattern)).flatMap((match) => {
-				const raw = match[0];
-				const value = parseTimestamp(raw);
-				if (!value) return [];
-				return [
-					{
-						value,
-						raw,
-						confidence: 0.9,
-						offsetStart: match.index ?? 0,
-						offsetEnd: (match.index ?? 0) + raw.length,
-					},
-				];
-			});
-		},
-	);
+	return [
+		isoTimestamp,
+		unixTimestamp,
+		rfcTimestamp,
+		logTimestamp,
+		timeOnlyTimestamp,
+	].flatMap((pattern) => {
+		pattern.lastIndex = 0;
+		return Array.from(text.matchAll(pattern)).flatMap((match) => {
+			const raw = match[0];
+			const value = parseTimestamp(raw);
+			if (!value) return [];
+			return [
+				{
+					value,
+					raw,
+					confidence: 0.9,
+					offsetStart: match.index ?? 0,
+					offsetEnd: (match.index ?? 0) + raw.length,
+				},
+			];
+		});
+	});
 }
 
 function collectEntities(text: string): ParsedEntity[] {
@@ -183,6 +196,15 @@ function collectEntities(text: string): ParsedEntity[] {
 			confidence: 0.7,
 			sourceText: match[0],
 		});
+	labelPattern.lastIndex = 0;
+	for (const match of text.matchAll(labelPattern)) {
+		entities.push({
+			type: match[1],
+			value: match[2],
+			confidence: 0.72,
+			sourceText: match[0],
+		});
+	}
 	return dedupeEntities(entities);
 }
 
@@ -216,13 +238,26 @@ function collectReferences(text: string): ParsedReference[] {
 }
 
 function collectMetrics(text: string): ParsedMetric[] {
+	const metrics: ParsedMetric[] = [];
 	latencyPattern.lastIndex = 0;
-	return Array.from(text.matchAll(latencyPattern)).map((match) => ({
-		name: "latency",
-		value: Number(match[1]),
-		unit: match[2],
-		sourceText: match[0],
-	}));
+	metrics.push(
+		...Array.from(text.matchAll(latencyPattern)).map((match) => ({
+			name: "latency",
+			value: Number(match[1]),
+			unit: match[2],
+			sourceText: match[0],
+		})),
+	);
+	shortNumberPattern.lastIndex = 0;
+	metrics.push(
+		...Array.from(text.matchAll(shortNumberPattern)).map((match) => ({
+			name: "dashboard_value",
+			value: Number(match[1]),
+			unit: match[2],
+			sourceText: match[0],
+		})),
+	);
+	return metrics;
 }
 
 function dedupeEntities(entities: ParsedEntity[]): ParsedEntity[] {
@@ -239,11 +274,13 @@ function collectEvents(
 	text: string,
 	timestamps: ParsedTimestamp[],
 ): ParsedEvent[] {
-	return text.split(/\r?\n/).flatMap((line) => {
-		if (!signalWords.test(line)) return [];
-		const timestamp = timestamps.find((candidate) =>
-			line.includes(candidate.raw),
-		);
+	return text.split(/\r?\n/).flatMap((line, index) => {
+		const isDashboardMetric = /^\s*[a-z][a-z0-9_.-]+\s*(?:—|-|:)/i.test(line);
+		if (!signalWords.test(line) && !isDashboardMetric) return [];
+		const timestamp =
+			timestamps.find((candidate) => line.includes(candidate.raw)) ??
+			timestamps[index] ??
+			timestamps[0];
 		return [
 			{
 				timestamp: timestamp?.value ?? null,
