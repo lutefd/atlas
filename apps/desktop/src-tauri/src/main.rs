@@ -158,8 +158,8 @@ fn clear_evidence_parsers(state: tauri::State<AppState>, evidence_id: String) ->
     let Some(incident_id) = evidence_info else { return Ok(()); };
     let tx = conn.transaction().map_err(|error| error.to_string())?;
     tx.execute("DELETE FROM search_index WHERE incident_id = ?1", params![&incident_id]).map_err(|error| error.to_string())?;
-    tx.execute("DELETE FROM timeline_events WHERE source_evidence_id = ?1", params![&evidence_id]).map_err(|error| error.to_string())?;
-    tx.execute("DELETE FROM entities WHERE source_evidence_id = ?1", params![&evidence_id]).map_err(|error| error.to_string())?;
+    tx.execute("DELETE FROM timeline_events WHERE source_evidence_id = ?1 AND source_parser_output_id IS NOT NULL", params![&evidence_id]).map_err(|error| error.to_string())?;
+    tx.execute("DELETE FROM entities WHERE source_evidence_id = ?1 AND source_parser_output_id IS NOT NULL", params![&evidence_id]).map_err(|error| error.to_string())?;
     tx.execute("DELETE FROM parser_outputs WHERE evidence_id = ?1", params![&evidence_id]).map_err(|error| error.to_string())?;
     rebuild_search_index(&tx, &incident_id)?;
     tx.commit().map_err(|error| error.to_string())?;

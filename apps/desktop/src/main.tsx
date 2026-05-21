@@ -30,12 +30,21 @@ async function ingestEvidence(input: { incidentId: string; kind: string; source:
     attachmentBase64 = await fileToBase64(input.file);
   }
   const evidence = await addEvidence({ incidentId: input.incidentId, kind: input.kind as Evidence["kind"], source: input.source, text: input.text, metadata: { fileName: input.file?.name }, attachmentName, attachmentMimeType: input.file?.type || null, attachmentBase64 });
+  await runParsersForEvidence(evidence);
+}
+
+async function runParsersForEvidence(evidence: Evidence) {
   const outputs = await parseEvidence(evidence);
   for (const output of outputs) {
     const timeline = deriveTimelineEvents(evidence.incidentId, output);
     const entities = deriveEntities(evidence.incidentId, output);
     await saveParserOutput({ id: output.id, evidenceId: output.evidenceId, parserName: output.parserName, parserVersion: output.parserVersion, output: output.output, timelineEvents: timeline, entities });
   }
+}
+
+async function replayEvidenceParsers(evidence: Evidence) {
+  await clearEvidenceParsers(evidence.id);
+  await runParsersForEvidence(evidence);
 }
 
 function base64ToBlob(base64: string, mimeType: string) {
@@ -54,6 +63,7 @@ function App() {
 function Workspace() {
   const queryClient = useQueryClient();
   const [incidentStatus, setIncidentStatus] = useState<string | null>(null);
+  const [replayStatus, setReplayStatus] = useState<string | null>(null);
   const [confirmingIncidentId, setConfirmingIncidentId] = useState<string | null>(null);
   const selectedIncidentId = useUi((state) => state.selectedIncidentId);
   const selectedEvidenceId = useUi((state) => state.selectedEvidenceId);
@@ -97,6 +107,21 @@ function Workspace() {
       setIncidentStatus(message);
     }
   }
+  async function replayIncidentParsers() {
+    if (!activeId || replayStatus === "running") return;
+    const replayableEvidence = evidence.filter((item) => Boolean(item.contentText));
+    setReplayStatus("running");
+    try {
+      for (const item of replayableEvidence) {
+        await replayEvidenceParsers(item);
+      }
+      await queryClient.invalidateQueries({ queryKey: ["snapshot"] });
+      setReplayStatus(`complete:${replayableEvidence.length}`);
+    } catch (caught) {
+      console.error("Incident parser replay failed:", caught);
+      setReplayStatus("failed");
+    }
+  }
 
   return <main className="shell">
     <aside className="sidebar">
@@ -114,7 +139,7 @@ function Workspace() {
         </div>;
       })}</div>
     </aside>
-    {active && data ? <><section className="center">{editingIncident?.id === active.id && editingIncident.surface === "header" ? <IncidentRenameInput className="header-rename" initialTitle={active.title} onSave={(title) => renameIncidentMutation.mutate({ id: active.id, title })} onCancel={() => setEditingIncident(null)} /> : <h1 onDoubleClick={() => setEditingIncident({ id: active.id, surface: "header" })} title="Double-click to rename">{active.title}</h1>}<EvidenceInbox incidentId={active.id} /><EvidenceStream evidence={evidence} selectedEvidenceId={selectedEvidenceId} onSelectEvidence={selectEvidence} parserOutputs={data?.parserOutputs ?? []} /></section><RightPanel incidentId={active.id} timeline={timeline} entities={entities} tags={tags} onSelectEvidence={selectEvidence} />{selectedEvidence ? <EvidenceDetail item={selectedEvidence} snapshot={data} onClose={() => selectEvidence(null)} /> : null}</> : <section className="empty"><Inbox size={40} /><h1>Create an incident workspace</h1><p>Paste logs, notes, screenshots, and files. Atlas keeps raw evidence immutable and derives structure beside it.</p></section>}
+    {active && data ? <><section className="center"><div className="incident-header">{editingIncident?.id === active.id && editingIncident.surface === "header" ? <IncidentRenameInput className="header-rename" initialTitle={active.title} onSave={(title) => renameIncidentMutation.mutate({ id: active.id, title })} onCancel={() => setEditingIncident(null)} /> : <h1 onDoubleClick={() => setEditingIncident({ id: active.id, surface: "header" })} title="Double-click to rename">{active.title}</h1>}<button className="secondary" disabled={replayStatus === "running" || evidence.every((item) => !item.contentText)} onClick={() => void replayIncidentParsers()}>{replayStatus === "running" ? "Replaying..." : "Replay parsers"}</button></div>{replayStatus && replayStatus !== "running" ? <p className={replayStatus === "failed" ? "error" : "replay-status"}>{replayStatus === "failed" ? "Parser replay failed. Raw evidence was preserved." : `Parser replay complete for ${replayStatus.split(":")[1]} evidence item(s).`}</p> : null}<EvidenceInbox incidentId={active.id} /><EvidenceStream evidence={evidence} selectedEvidenceId={selectedEvidenceId} onSelectEvidence={selectEvidence} parserOutputs={data?.parserOutputs ?? []} /></section><RightPanel incidentId={active.id} timeline={timeline} entities={entities} tags={tags} onSelectEvidence={selectEvidence} />{selectedEvidence ? <EvidenceDetail item={selectedEvidence} snapshot={data} onClose={() => selectEvidence(null)} /> : null}</> : <section className="empty"><Inbox size={40} /><h1>Create an incident workspace</h1><p>Paste logs, notes, screenshots, and files. Atlas keeps raw evidence immutable and derives structure beside it.</p></section>}
   </main>;
 }
 
@@ -230,7 +255,7 @@ function EvidenceCard({ item, isSelected, onSelect, isParsed }: { item: Evidence
     }
   }
   return <article className={isSelected ? "card selected" : "card"} onClick={onSelect}>
-    <div className="card-header"><div className="card-meta"><FileText size={14} />{item.kind} · {item.source} · {new Date(item.createdAt).toLocaleString()}<span className={isParsed ? "parse-dot parsed" : "parse-dot"} title={isParsed ? "Parsed" : "Unparsed"} /></div><div className="card-actions"><button className="icon-button" title="Copy evidence" onClick={(event) => { event.stopPropagation(); void copyEvidence(); }}><Clipboard size={14} /></button><button className={isConfirmingDelete ? "confirm-delete" : "icon-button danger"} title="Delete evidence" onClick={(event) => void deleteEvidenceAfterConfirm(event)}>{isConfirmingDelete ? "Confirm" : <Trash2 size={14} />}</button></div></div>
+    <div className="card-header"><div className="card-meta"><FileText size={14} />{item.kind} · {item.source} · {new Date(item.createdAt).toLocaleString()}<span className={isParsed ? "parse-badge parsed" : "parse-badge"}>{isParsed ? "parsed" : "unparsed"}</span>{item.attachmentId ? <span className="parse-badge">file</span> : null}</div><div className="card-actions"><button className="icon-button" title="Copy evidence" onClick={(event) => { event.stopPropagation(); void copyEvidence(); }}><Clipboard size={14} /></button><button className={isConfirmingDelete ? "confirm-delete" : "icon-button danger"} title="Delete evidence" onClick={(event) => void deleteEvidenceAfterConfirm(event)}>{isConfirmingDelete ? "Confirm" : <Trash2 size={14} />}</button></div></div>
     {attachmentUrl && attachment && isImageAttachment ? <img className="attachment-preview" src={attachmentUrl} alt={attachment.name} /> : null}
     {attachmentUrl && attachment && !isImageAttachment ? <a className="attachment-link" href={attachmentUrl} download={attachment.name}>{attachment.name}</a> : null}
     <pre>{item.contentText || (item.attachmentId ? "Attachment stored locally" : "")}</pre>
@@ -252,13 +277,7 @@ function EvidenceDetail({ item, snapshot, onClose }: { item: Evidence; snapshot:
     if (!canReplay || isReplaying) return;
     setIsReplaying(true);
     try {
-      await clearEvidenceParsers(item.id);
-      const outputs = await parseEvidence(item);
-      for (const output of outputs) {
-        const derivedTimeline = deriveTimelineEvents(item.incidentId, output);
-        const derivedEntities = deriveEntities(item.incidentId, output);
-        await saveParserOutput({ id: output.id, evidenceId: output.evidenceId, parserName: output.parserName, parserVersion: output.parserVersion, output: output.output, timelineEvents: derivedTimeline, entities: derivedEntities });
-      }
+      await replayEvidenceParsers(item);
       queryClient.invalidateQueries({ queryKey: ["snapshot"] });
     } catch (caught) {
       console.error("Replay failed:", caught);
@@ -271,7 +290,7 @@ function EvidenceDetail({ item, snapshot, onClose }: { item: Evidence; snapshot:
     {attachmentUrl && attachment?.mimeType.startsWith("image/") ? <img className="attachment-preview" src={attachmentUrl} alt={attachment.name} /> : null}
     {attachmentUrl && attachment && !attachment.mimeType.startsWith("image/") ? <a className="attachment-link" href={attachmentUrl} download={attachment.name}>{attachment.name}</a> : null}
     <section><h3>Raw evidence</h3><pre>{item.contentText || (item.attachmentId ? "Attachment stored locally" : "")}</pre></section>
-    <section><h3>Parser outputs</h3>{parserOutputs.length ? parserOutputs.map((output) => <details key={output.id} open><summary>{output.parserName} v{output.parserVersion}</summary><pre>{JSON.stringify(output.output, null, 2)}</pre></details>) : <p className="muted">No parser output for this evidence.</p>}</section>
+    <section><h3>Parser outputs</h3>{parserOutputs.length ? parserOutputs.map((output) => <details key={output.id} open><summary>{output.parserName} v{output.parserVersion} · {new Date(output.createdAt).toLocaleString()}</summary><pre>{JSON.stringify(output.output, null, 2)}</pre></details>) : <p className="muted">No parser output for this evidence.</p>}</section>
     <section><h3>Derived timeline</h3>{timeline.length ? timeline.map((event) => <div className="detail-row" key={event.id}><strong>{event.title}</strong><span>{new Date(event.timestamp).toLocaleString()} · {Math.round(event.confidence * 100)}%</span></div>) : <p className="muted">No timeline events derived from this evidence.</p>}</section>
     <section><h3>Derived entities</h3>{entities.length ? entities.map((entity) => <span className="pill" key={entity.id}>{entity.type}: {entity.name}</span>) : <p className="muted">No entities derived from this evidence.</p>}</section>
     <section><h3>Metadata</h3><pre>{JSON.stringify({ id: item.id, contentHash: item.contentHash, createdAt: item.createdAt, metadata: item.metadata }, null, 2)}</pre></section>
