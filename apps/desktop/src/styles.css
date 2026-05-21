@@ -52,6 +52,9 @@ code { color: #627044; background: #eef5d5; padding: 3px 6px; border-radius: 8px
 .attachment-link { display: inline-flex; margin-bottom: 12px; color: #172018; font-weight: 700; }
 .right { background: #ebe4d7; border-left: 1px solid #d8d0c1; padding: 20px; overflow: auto; max-height: 100vh; }
 .panel { background: rgba(255,250,240,0.7); border: 1px solid #ded5c6; border-radius: 20px; padding: 14px; margin-bottom: 14px; }
+.panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.panel-heading h2 { margin: 0; }
+.panel-heading button { background: #172018; color: #f7f2e8; border-radius: 10px; padding: 7px 9px; font-size: 12px; font-weight: 800; }
 input, textarea, select { width: 100%; border: 1px solid #cfc6b6; background: #fffaf0; border-radius: 12px; padding: 10px; }
 textarea { min-height: 72px; resize: vertical; }
 .result, .event button { display: grid; width: 100%; gap: 4px; padding: 10px 0; border-bottom: 1px solid #ded5c6; background: transparent; color: inherit; text-align: left; min-width: 0; }
@@ -64,10 +67,14 @@ textarea { min-height: 72px; resize: vertical; }
 mark { background: #d4ff5f; }
 .pill { display: inline-flex; margin: 0 6px 6px 0; background: #172018; color: #f7f2e8; border-radius: 999px; padding: 6px 9px; font-size: 12px; }
 .timeline-panel { max-height: 420px; overflow: hidden; }
-.timeline-list { max-height: 220px; overflow-y: auto; padding-right: 4px; }
+.timeline-list { max-height: 340px; overflow-y: auto; padding-right: 4px; }
 .manual-event-form { display: grid; gap: 8px; margin-bottom: 12px; }
 .manual-event-actions, .event-actions { display: flex; gap: 6px; }
 .manual-event-actions button, .event-actions button { background: rgba(23,32,24,0.08); border-radius: 9px; padding: 7px 9px; color: #172018; font-size: 12px; font-weight: 800; }
+.modal-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: rgba(23,32,24,0.42); padding: 20px; }
+.modal { width: min(520px, 100%); max-height: min(680px, 100vh - 40px); overflow: auto; background: #fffaf0; border: 1px solid #d8d0c1; border-radius: 20px; padding: 16px; box-shadow: 0 24px 80px rgba(23,32,24,0.28); }
+.modal-header { display: flex; align-items: start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.modal-header h2 { margin: 0; }
 .entity-link:hover { background: #627044; }
 .tag-pill { align-items: center; gap: 6px; padding-right: 6px; }
 .tag-pill button { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 999px; background: rgba(255,255,255,0.14); color: #f7f2e8; line-height: 1; }
