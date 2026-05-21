@@ -8,6 +8,7 @@ import {
 import CodeMirror from "@uiw/react-codemirror";
 import {
 	Clipboard,
+	Download,
 	FileText,
 	Inbox,
 	Pencil,
@@ -37,17 +38,21 @@ import {
 	deleteIncident,
 	deleteManualTimelineEvent,
 	deleteTag,
-	exportIncident,
+	exportIncidentToDirectory,
 	hasOcr,
 	importIncident,
 	loadAttachment,
 	loadSnapshot,
 	openAttachment,
 	renameIncident,
+	revealPath,
 	revealAttachment,
 	runOcr,
+	saveMarkdownDocument,
 	saveParserOutput,
 	search,
+	selectExportDirectory,
+	selectImportDirectory,
 	updateJob,
 	updateManualTimelineEvent,
 	type AttachmentData,
@@ -254,6 +259,176 @@ function base64ToBlob(base64: string, mimeType: string) {
 	return new Blob([bytes], { type: mimeType });
 }
 
+function formatDateTime(value: string) {
+	return new Date(value).toLocaleString();
+}
+
+function escapeMarkdown(value: string) {
+	return value.replace(/([\\`*_{}[\]()#+.!|-])/g, "\\$1");
+}
+
+function fenced(value: string) {
+	return `\n\`\`\`\n${value.replace(/\`\`\`/g, "` ` `")}\n\`\`\`\n`;
+}
+
+function incidentExportName(incident: Incident, suffix: string) {
+	const safeTitle = incident.title
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/(^-|-$)/g, "")
+		.slice(0, 80);
+	return `${safeTitle || "incident"}-${suffix}.md`;
+}
+
+async function buildIncidentMarkdown(input: {
+	incident: Incident;
+	snapshot: Snapshot;
+	includeAttachments: boolean;
+}) {
+	const { incident, snapshot, includeAttachments } = input;
+	const evidence = snapshot.evidence.filter(
+		(item) => item.incidentId === incident.id,
+	);
+	const notes = evidence.filter((item) => item.kind === "note");
+	const timeline = snapshot.timelineEvents.filter(
+		(item) => item.incidentId === incident.id,
+	);
+	const entities = snapshot.entities.filter(
+		(item) => item.incidentId === incident.id,
+	);
+	const tags = snapshot.tags.filter((item) => item.incidentId === incident.id);
+	const attachments = new Map<string, AttachmentData>();
+	if (includeAttachments) {
+		for (const item of evidence) {
+			if (!item.attachmentId) continue;
+			const attachment = await loadAttachment(item.id);
+			if (attachment) attachments.set(item.id, attachment);
+		}
+	}
+
+	const lines = [
+		`# ${incident.title}`,
+		"",
+		`- Created: ${formatDateTime(incident.createdAt)}`,
+		`- Updated: ${formatDateTime(incident.updatedAt)}`,
+		`- Evidence: ${evidence.length}`,
+		`- Timeline events: ${timeline.length}`,
+		`- Entities: ${entities.length}`,
+		...(tags.length
+			? [`- Tags: ${tags.map((tag) => escapeMarkdown(tag.name)).join(", ")}`]
+			: []),
+		"",
+		"## Timeline",
+		"",
+		...(timeline.length
+			? timeline.flatMap((event) => [
+					`### ${formatDateTime(event.timestamp)} - ${event.title}`,
+					"",
+					...(event.sourceEvidenceId
+						? [`- Source evidence: ${event.sourceEvidenceId}`]
+						: []),
+					"",
+					event.description,
+					"",
+				])
+			: ["No timeline events recorded.", ""]),
+		"## Entities",
+		"",
+		...(entities.length
+			? entities.map((entity) => `- ${entity.type}: ${entity.name}`)
+			: ["No entities recorded."]),
+		"",
+		"## Notes",
+		"",
+		...(notes.length
+			? notes.flatMap((note) => [
+					`### ${note.source}`,
+					"",
+					note.contentText ? fenced(note.contentText) : "No note text.",
+				])
+			: ["No notes recorded.", ""]),
+		"",
+		"## Evidence",
+		"",
+	];
+
+	for (const item of evidence) {
+		const attachment = attachments.get(item.id);
+		lines.push(
+			`### ${item.kind} from ${item.source}`,
+			"",
+			`- Created: ${formatDateTime(item.createdAt)}`,
+			`- Content hash: ${item.contentHash}`,
+		);
+		if (attachment) {
+			lines.push(
+				`- Attachment: ${attachment.name} (${attachment.mimeType})`,
+				`- Attachment path: ${attachment.path}`,
+			);
+		}
+		lines.push(
+			"",
+			item.contentText ? fenced(item.contentText) : "No text content.",
+		);
+		if (attachment?.mimeType.startsWith("image/")) {
+			lines.push(
+				`![${attachment.name}](data:${attachment.mimeType};base64,${attachment.base64})`,
+				"",
+			);
+		} else if (attachment) {
+			lines.push("Attachment base64:", fenced(attachment.base64));
+		}
+	}
+	return lines.join("\n");
+}
+
+function buildSlackIncidentMessage(input: {
+	incident: Incident;
+	snapshot: Snapshot;
+}) {
+	const { incident, snapshot } = input;
+	const evidence = snapshot.evidence.filter(
+		(item) => item.incidentId === incident.id,
+	);
+	const timeline = snapshot.timelineEvents.filter(
+		(item) => item.incidentId === incident.id,
+	);
+	const entities = snapshot.entities.filter(
+		(item) => item.incidentId === incident.id,
+	);
+	const tags = snapshot.tags.filter((item) => item.incidentId === incident.id);
+	const topTimeline = timeline.slice(0, 6);
+	const topEntities = entities.slice(0, 12);
+	return [
+		`*Incident:* ${incident.title}`,
+		`*Updated:* ${formatDateTime(incident.updatedAt)}`,
+		tags.length ? `*Tags:* ${tags.map((tag) => tag.name).join(", ")}` : null,
+		`*Summary:* ${timeline.length} timeline events, ${evidence.length} evidence items, ${entities.length} entities.`,
+		"",
+		"*Timeline*",
+		...(topTimeline.length
+			? topTimeline.map(
+					(event) =>
+						`- ${formatDateTime(event.timestamp)} - ${event.title}: ${event.description}`,
+				)
+			: ["- No timeline events recorded."]),
+		...(timeline.length > topTimeline.length
+			? [`- +${timeline.length - topTimeline.length} more events in Atlas.`]
+			: []),
+		"",
+		"*Key entities*",
+		...(topEntities.length
+			? [
+					topEntities
+						.map((entity) => `${entity.type}: ${entity.name}`)
+						.join(", "),
+				]
+			: ["None recorded."]),
+	]
+		.filter(Boolean)
+		.join("\n");
+}
+
 function AttachmentActions({
 	evidenceId,
 	attachment,
@@ -317,7 +492,6 @@ function Workspace() {
 	const queryClient = useQueryClient();
 	const [incidentStatus, setIncidentStatus] = useState<string | null>(null);
 	const [replayStatus, setReplayStatus] = useState<string | null>(null);
-	const [importPath, setImportPath] = useState("");
 	const [confirmingIncidentId, setConfirmingIncidentId] = useState<
 		string | null
 	>(null);
@@ -419,8 +593,49 @@ function Workspace() {
 	async function exportActiveIncident() {
 		if (!activeId) return;
 		try {
-			const path = await exportIncident(activeId);
+			const destination = await selectExportDirectory();
+			if (!destination) return;
+			const path = await exportIncidentToDirectory(activeId, destination);
 			setIncidentStatus(`Exported to ${path}`);
+			await revealPath(path);
+		} catch (caught) {
+			setIncidentStatus(
+				caught instanceof Error ? caught.message : String(caught),
+			);
+		}
+	}
+	async function exportActiveIncidentDocument() {
+		if (!active || !data) return;
+		try {
+			setIncidentStatus("Building Markdown export...");
+			const markdown = await buildIncidentMarkdown({
+				incident: active,
+				snapshot: data,
+				includeAttachments: true,
+			});
+			const path = await saveMarkdownDocument(
+				incidentExportName(active, "document"),
+				markdown,
+			);
+			if (!path) {
+				setIncidentStatus(null);
+				return;
+			}
+			setIncidentStatus(`Markdown document exported to ${path}`);
+			await revealPath(path);
+		} catch (caught) {
+			setIncidentStatus(
+				caught instanceof Error ? caught.message : String(caught),
+			);
+		}
+	}
+	async function copyActiveIncidentSlackMessage() {
+		if (!active || !data) return;
+		try {
+			await navigator.clipboard.writeText(
+				buildSlackIncidentMessage({ incident: active, snapshot: data }),
+			);
+			setIncidentStatus("Slack incident message copied");
 		} catch (caught) {
 			setIncidentStatus(
 				caught instanceof Error ? caught.message : String(caught),
@@ -428,10 +643,10 @@ function Workspace() {
 		}
 	}
 	async function importIncidentFromPath() {
-		if (!importPath.trim()) return;
 		try {
-			await importIncident(importPath.trim());
-			setImportPath("");
+			const importPath = await selectImportDirectory();
+			if (!importPath) return;
+			await importIncident(importPath);
 			setIncidentStatus("Incident imported");
 			queryClient.invalidateQueries({ queryKey: ["snapshot"] });
 		} catch (caught) {
@@ -454,17 +669,7 @@ function Workspace() {
 					<Plus size={16} /> Create incident
 				</button>
 				<div className="import-box">
-					<input
-						value={importPath}
-						onChange={(event) => setImportPath(event.target.value)}
-						placeholder="Import incident folder path"
-					/>
-					<button
-						onClick={() => void importIncidentFromPath()}
-						disabled={!importPath.trim()}
-					>
-						Import
-					</button>
+					<button onClick={() => void importIncidentFromPath()}>Import</button>
 				</div>
 				{incidentStatus ? (
 					<div className="sidebar-status">{incidentStatus}</div>
@@ -567,6 +772,20 @@ function Workspace() {
 									onClick={() => void exportActiveIncident()}
 								>
 									Export
+								</button>
+								<button
+									className="secondary"
+									title="Download a detailed Markdown document with embedded attachment data"
+									onClick={() => void exportActiveIncidentDocument()}
+								>
+									<Download size={14} /> Export document
+								</button>
+								<button
+									className="secondary"
+									title="Copy a concise incident update for a Slack thread"
+									onClick={() => void copyActiveIncidentSlackMessage()}
+								>
+									<Clipboard size={14} /> Slack message
 								</button>
 								<button
 									className="secondary"
