@@ -50,6 +50,9 @@ code { color: #627044; background: #eef5d5; padding: 3px 6px; border-radius: 8px
 .copy-status { color: #627044; font-size: 12px; margin: -2px 0 10px; }
 .attachment-preview { display: block; max-width: 100%; max-height: 360px; object-fit: contain; border-radius: 14px; border: 1px solid #e1d9ca; margin-bottom: 12px; background: #fff; }
 .attachment-link { display: inline-flex; margin-bottom: 12px; color: #172018; font-weight: 700; }
+.attachment-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.attachment-actions button { background: rgba(23,32,24,0.08); color: #172018; border-radius: 9px; padding: 7px 9px; font-size: 12px; font-weight: 800; }
+.attachment-actions button:hover { background: rgba(23,32,24,0.16); }
 .right { background: #ebe4d7; border-left: 1px solid #d8d0c1; padding: 20px; overflow: auto; max-height: 100vh; }
 .panel { background: rgba(255,250,240,0.7); border: 1px solid #ded5c6; border-radius: 20px; padding: 14px; margin-bottom: 14px; }
 .panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }

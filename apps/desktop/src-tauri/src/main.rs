@@ -2,7 +2,7 @@ use base64::Engine;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{fs, path::{Path, PathBuf}, sync::Mutex};
+use std::{fs, path::{Path, PathBuf}, process::Command, sync::Mutex};
 use tauri::Manager;
 
 struct AppState { db_path: PathBuf, attachments_dir: PathBuf, lock: Mutex<()> }
@@ -14,7 +14,7 @@ struct Incident { id: String, title: String, created_at: String, updated_at: Str
 struct Evidence { id: String, incident_id: String, kind: String, source: String, content_text: Option<String>, content_hash: String, created_at: String, metadata_json: String, attachment_id: Option<String> }
 
 #[derive(Serialize)]
-struct AttachmentData { name: String, mime_type: String, base64: String }
+struct AttachmentData { name: String, mime_type: String, base64: String, path: String }
 
 #[derive(Serialize)]
 struct TimelineEvent { id: String, incident_id: String, timestamp: String, title: String, description: String, confidence: f64, source_evidence_id: Option<String>, source_parser_output_id: Option<String>, created_at: String }
@@ -336,7 +336,23 @@ fn load_attachment(state: tauri::State<AppState>, evidence_id: String) -> Result
     let bytes = fs::read(&path).map_err(|e| e.to_string())?;
     let name = PathBuf::from(&path).file_name().and_then(|value| value.to_str()).unwrap_or("attachment").to_string();
     let inferred = if name.ends_with(".png") { "image/png" } else if name.ends_with(".jpg") || name.ends_with(".jpeg") { "image/jpeg" } else if name.ends_with(".gif") { "image/gif" } else { "application/octet-stream" };
-    Ok(Some(AttachmentData { name, mime_type: mime_type.unwrap_or_else(|| inferred.to_string()), base64: base64::engine::general_purpose::STANDARD.encode(bytes) }))
+    Ok(Some(AttachmentData { name, mime_type: mime_type.unwrap_or_else(|| inferred.to_string()), base64: base64::engine::general_purpose::STANDARD.encode(bytes), path }))
+}
+
+#[tauri::command]
+fn open_attachment(state: tauri::State<AppState>, evidence_id: String) -> Result<(), String> {
+    let conn = open(&state.db_path)?;
+    let path = conn.query_row("SELECT path FROM attachments WHERE evidence_id = ?1 LIMIT 1", params![evidence_id], |row| row.get::<_, String>(0)).map_err(|error| error.to_string())?;
+    Command::new("open").arg(&path).status().map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn reveal_attachment(state: tauri::State<AppState>, evidence_id: String) -> Result<(), String> {
+    let conn = open(&state.db_path)?;
+    let path = conn.query_row("SELECT path FROM attachments WHERE evidence_id = ?1 LIMIT 1", params![evidence_id], |row| row.get::<_, String>(0)).map_err(|error| error.to_string())?;
+    Command::new("open").arg("-R").arg(&path).status().map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 fn main() {
@@ -350,7 +366,7 @@ fn main() {
             app.manage(AppState { db_path, attachments_dir: app_dir.join("attachments"), lock: Mutex::new(()) });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![create_incident, rename_incident, add_evidence, save_parser_output, create_job, update_job, create_manual_timeline_event, update_manual_timeline_event, delete_manual_timeline_event, add_tag, delete_tag, clear_evidence_parsers, delete_evidence, delete_incident, load_snapshot, search, load_attachment])
+        .invoke_handler(tauri::generate_handler![create_incident, rename_incident, add_evidence, save_parser_output, create_job, update_job, create_manual_timeline_event, update_manual_timeline_event, delete_manual_timeline_event, add_tag, delete_tag, clear_evidence_parsers, delete_evidence, delete_incident, load_snapshot, search, load_attachment, open_attachment, reveal_attachment])
         .run(tauri::generate_context!())
         .expect("failed to run atlas");
 }

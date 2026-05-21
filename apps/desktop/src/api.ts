@@ -12,7 +12,7 @@ export type JobDto = { id: string; kind: string; status: string; payload_json: s
 export type ParserOutputRecord = { id: string; evidenceId: string; parserName: string; parserVersion: string; output: ParsedOutput; createdAt: string };
 export type Tag = { id: string; incidentId: string; name: string; createdAt: string };
 export type Job = { id: string; kind: string; status: string; payload: Record<string, unknown>; errorText: string | null; createdAt: string; updatedAt: string };
-export type AttachmentData = { name: string; mimeType: string; base64: string };
+export type AttachmentData = { name: string; mimeType: string; base64: string; path: string };
 export type SearchResult = { kind: "evidence" | "timeline" | "entity" | "attachment" | string; refId: string; title: string; snippet: string };
 
 export type SnapshotDto = { incidents: IncidentDto[]; evidence: EvidenceDto[]; timeline_events: TimelineEventDto[]; entities: EntityDto[]; tags: TagDto[]; parser_outputs: ParserOutputDto[]; jobs: JobDto[] };
@@ -106,6 +106,9 @@ export async function addTag(incidentId: string, name: string) { await invoke("a
 export async function deleteTag(tagId: string) { await invoke("delete_tag", { tagId }); }
 export async function search(incidentId: string, query: string) { return invoke<SearchResult[]>("search", { incidentId, query }); }
 export async function loadAttachment(evidenceId: string): Promise<AttachmentData | null> {
-  const attachment = await invoke<{ name: string; mime_type: string; base64: string } | null>("load_attachment", { evidenceId });
-  return attachment ? { name: attachment.name, mimeType: attachment.mime_type, base64: attachment.base64 } : null;
+  const attachment = await invoke<{ name: string; mime_type: string; base64: string; path: string } | null>("load_attachment", { evidenceId });
+  return attachment ? { name: attachment.name, mimeType: attachment.mime_type, base64: attachment.base64, path: attachment.path } : null;
 }
+
+export async function openAttachment(evidenceId: string) { await invoke("open_attachment", { evidenceId }); }
+export async function revealAttachment(evidenceId: string) { await invoke("reveal_attachment", { evidenceId }); }

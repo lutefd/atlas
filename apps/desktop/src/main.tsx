@@ -6,7 +6,7 @@ import { createRoot } from "react-dom/client";
 import { create } from "zustand";
 import { deriveEntities, deriveTimelineEvents, parseEvidence } from "@atlas/core";
 import type { Evidence, Incident } from "@atlas/shared";
-import { addEvidence, addTag, clearEvidenceParsers, createIncident, createJob, createManualTimelineEvent, deleteEvidence, deleteIncident, deleteManualTimelineEvent, deleteTag, loadAttachment, loadSnapshot, renameIncident, saveParserOutput, search, updateJob, updateManualTimelineEvent, type Job, type SearchResult, type Snapshot } from "./api";
+import { addEvidence, addTag, clearEvidenceParsers, createIncident, createJob, createManualTimelineEvent, deleteEvidence, deleteIncident, deleteManualTimelineEvent, deleteTag, loadAttachment, loadSnapshot, openAttachment, renameIncident, revealAttachment, saveParserOutput, search, updateJob, updateManualTimelineEvent, type AttachmentData, type Job, type SearchResult, type Snapshot } from "./api";
 import "./styles.css";
 
 const client = new QueryClient();
@@ -78,6 +78,22 @@ function base64ToBlob(base64: string, mimeType: string) {
     bytes[index] = binary.charCodeAt(index);
   }
   return new Blob([bytes], { type: mimeType });
+}
+
+function AttachmentActions({ evidenceId, attachment, onStatus }: { evidenceId: string; attachment: AttachmentData; onStatus: (value: string) => void }) {
+  async function copyPath() {
+    await navigator.clipboard.writeText(attachment.path);
+    onStatus("Attachment path copied");
+  }
+  async function openStoredAttachment() {
+    await openAttachment(evidenceId);
+    onStatus("Attachment opened");
+  }
+  async function revealStoredAttachment() {
+    await revealAttachment(evidenceId);
+    onStatus("Attachment revealed in Finder");
+  }
+  return <div className="attachment-actions"><button onClick={(event) => { event.stopPropagation(); void openStoredAttachment(); }}>Open attachment</button><button onClick={(event) => { event.stopPropagation(); void revealStoredAttachment(); }}>Reveal in Finder</button><button onClick={(event) => { event.stopPropagation(); void copyPath(); }}>Copy path</button></div>;
 }
 
 function App() {
@@ -290,6 +306,7 @@ function EvidenceCard({ item, isSelected, onSelect, parseStatus }: { item: Evide
   return <article className={isSelected ? "card selected" : "card"} onClick={onSelect}>
     <div className="card-header"><div className="card-meta"><FileText size={14} />{item.kind} · {item.source} · {new Date(item.createdAt).toLocaleString()}<span className={`parse-badge ${parseStatus}`}>{parseStatus}</span>{item.attachmentId ? <span className="parse-badge">file</span> : null}</div><div className="card-actions"><button className="icon-button" title="Copy evidence" onClick={(event) => { event.stopPropagation(); void copyEvidence(); }}><Clipboard size={14} /></button><button className={isConfirmingDelete ? "confirm-delete" : "icon-button danger"} title="Delete evidence" onClick={(event) => void deleteEvidenceAfterConfirm(event)}>{isConfirmingDelete ? "Confirm" : <Trash2 size={14} />}</button></div></div>
     {attachmentUrl && attachment && isImageAttachment ? <img className="attachment-preview" src={attachmentUrl} alt={attachment.name} /> : null}
+    {attachment ? <AttachmentActions evidenceId={item.id} attachment={attachment} onStatus={setStatus} /> : item.attachmentId ? <p className="muted">Attachment is stored locally but could not be loaded.</p> : null}
     {attachmentUrl && attachment && !isImageAttachment ? <a className="attachment-link" href={attachmentUrl} download={attachment.name}>{attachment.name}</a> : null}
     <pre>{item.contentText || (item.attachmentId ? "Attachment stored locally" : "")}</pre>
     {status ? <div className="copy-status">{status}</div> : null}
@@ -300,6 +317,7 @@ function EvidenceCard({ item, isSelected, onSelect, parseStatus }: { item: Evide
 function EvidenceDetail({ item, snapshot, onClose }: { item: Evidence; snapshot: Snapshot; onClose: () => void }) {
   const queryClient = useQueryClient();
   const [isReplaying, setIsReplaying] = useState(false);
+  const [attachmentStatus, setAttachmentStatus] = useState<string | null>(null);
   const parserOutputs = snapshot.parserOutputs.filter((output) => output.evidenceId === item.id);
   const timeline = snapshot.timelineEvents.filter((event) => event.sourceEvidenceId === item.id);
   const entities = snapshot.entities.filter((entity) => entity.sourceEvidenceId === item.id);
@@ -321,6 +339,8 @@ function EvidenceDetail({ item, snapshot, onClose }: { item: Evidence; snapshot:
   return <aside className="detail-drawer">
     <div className="detail-header"><div><h2>Evidence detail</h2><strong>{item.kind} from {item.source}</strong></div><div className="detail-actions">{canReplay && <button className="icon-button" title="Re-run parser" disabled={isReplaying} onClick={() => void handleReplay()}>{isReplaying ? "..." : "↻"}</button>}<button className="icon-button" title="Close detail" onClick={onClose}><X size={14} /></button></div></div>
     {attachmentUrl && attachment?.mimeType.startsWith("image/") ? <img className="attachment-preview" src={attachmentUrl} alt={attachment.name} /> : null}
+    {attachment ? <AttachmentActions evidenceId={item.id} attachment={attachment} onStatus={setAttachmentStatus} /> : item.attachmentId ? <p className="muted">Attachment is missing or failed to load.</p> : null}
+    {attachmentStatus ? <div className="copy-status">{attachmentStatus}</div> : null}
     {attachmentUrl && attachment && !attachment.mimeType.startsWith("image/") ? <a className="attachment-link" href={attachmentUrl} download={attachment.name}>{attachment.name}</a> : null}
     <section><h3>Raw evidence</h3><pre>{item.contentText || (item.attachmentId ? "Attachment stored locally" : "")}</pre></section>
     <section><h3>Parser outputs</h3>{parserOutputs.length ? parserOutputs.map((output) => <details key={output.id} open><summary>{output.parserName} v{output.parserVersion} · {new Date(output.createdAt).toLocaleString()}</summary><pre>{JSON.stringify(output.output, null, 2)}</pre></details>) : <p className="muted">No parser output for this evidence.</p>}</section>
