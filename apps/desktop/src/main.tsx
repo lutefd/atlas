@@ -6,7 +6,7 @@ import { createRoot } from "react-dom/client";
 import { create } from "zustand";
 import { deriveEntities, deriveTimelineEvents, parseEvidence } from "@atlas/core";
 import type { Evidence, Incident } from "@atlas/shared";
-import { addEvidence, addTag, clearEvidenceParsers, createIncident, deleteEvidence, deleteIncident, deleteTag, loadAttachment, loadSnapshot, renameIncident, saveParserOutput, search, type SearchResult, type Snapshot } from "./api";
+import { addEvidence, addTag, clearEvidenceParsers, createIncident, createJob, deleteEvidence, deleteIncident, deleteTag, loadAttachment, loadSnapshot, renameIncident, saveParserOutput, search, updateJob, type Job, type SearchResult, type Snapshot } from "./api";
 import "./styles.css";
 
 const client = new QueryClient();
@@ -30,16 +30,40 @@ async function ingestEvidence(input: { incidentId: string; kind: string; source:
     attachmentBase64 = await fileToBase64(input.file);
   }
   const evidence = await addEvidence({ incidentId: input.incidentId, kind: input.kind as Evidence["kind"], source: input.source, text: input.text, metadata: { fileName: input.file?.name }, attachmentName, attachmentMimeType: input.file?.type || null, attachmentBase64 });
-  await runParsersForEvidence(evidence);
+  try {
+    await runParsersForEvidence(evidence);
+  } catch (caught) {
+    console.error("Parser failed after evidence was saved:", caught);
+  }
 }
 
 async function runParsersForEvidence(evidence: Evidence) {
-  const outputs = await parseEvidence(evidence);
-  for (const output of outputs) {
-    const timeline = deriveTimelineEvents(evidence.incidentId, output);
-    const entities = deriveEntities(evidence.incidentId, output);
-    await saveParserOutput({ id: output.id, evidenceId: output.evidenceId, parserName: output.parserName, parserVersion: output.parserVersion, output: output.output, timelineEvents: timeline, entities });
+  const jobId = crypto.randomUUID();
+  await createJob({ id: jobId, kind: "parser", status: "running", payload: { evidenceId: evidence.id, incidentId: evidence.incidentId } });
+  try {
+    const outputs = await parseEvidence(evidence);
+    for (const output of outputs) {
+      const timeline = deriveTimelineEvents(evidence.incidentId, output);
+      const entities = deriveEntities(evidence.incidentId, output);
+      await saveParserOutput({ id: output.id, evidenceId: output.evidenceId, parserName: output.parserName, parserVersion: output.parserVersion, output: output.output, timelineEvents: timeline, entities });
+    }
+    await updateJob({ id: jobId, status: "succeeded" });
+  } catch (caught) {
+    await updateJob({ id: jobId, status: "failed", errorText: caught instanceof Error ? caught.message : String(caught) });
+    throw caught;
   }
+}
+
+function getParserJob(evidenceId: string, jobs: Job[]) {
+  return jobs.find((job) => job.kind === "parser" && job.payload.evidenceId === evidenceId) ?? null;
+}
+
+function getParseStatus(evidence: Evidence, snapshot: Snapshot) {
+  if (snapshot.parserOutputs.some((output) => output.evidenceId === evidence.id)) return "parsed";
+  const job = getParserJob(evidence.id, snapshot.jobs);
+  if (job?.status === "failed") return "failed";
+  if (job?.status === "running") return "running";
+  return "unparsed";
 }
 
 async function replayEvidenceParsers(evidence: Evidence) {
@@ -139,7 +163,7 @@ function Workspace() {
         </div>;
       })}</div>
     </aside>
-    {active && data ? <><section className="center"><div className="incident-header">{editingIncident?.id === active.id && editingIncident.surface === "header" ? <IncidentRenameInput className="header-rename" initialTitle={active.title} onSave={(title) => renameIncidentMutation.mutate({ id: active.id, title })} onCancel={() => setEditingIncident(null)} /> : <h1 onDoubleClick={() => setEditingIncident({ id: active.id, surface: "header" })} title="Double-click to rename">{active.title}</h1>}<button className="secondary" disabled={replayStatus === "running" || evidence.every((item) => !item.contentText)} onClick={() => void replayIncidentParsers()}>{replayStatus === "running" ? "Replaying..." : "Replay parsers"}</button></div>{replayStatus && replayStatus !== "running" ? <p className={replayStatus === "failed" ? "error" : "replay-status"}>{replayStatus === "failed" ? "Parser replay failed. Raw evidence was preserved." : `Parser replay complete for ${replayStatus.split(":")[1]} evidence item(s).`}</p> : null}<EvidenceInbox incidentId={active.id} /><EvidenceStream evidence={evidence} selectedEvidenceId={selectedEvidenceId} onSelectEvidence={selectEvidence} parserOutputs={data?.parserOutputs ?? []} /></section><RightPanel incidentId={active.id} timeline={timeline} entities={entities} tags={tags} onSelectEvidence={selectEvidence} />{selectedEvidence ? <EvidenceDetail item={selectedEvidence} snapshot={data} onClose={() => selectEvidence(null)} /> : null}</> : <section className="empty"><Inbox size={40} /><h1>Create an incident workspace</h1><p>Paste logs, notes, screenshots, and files. Atlas keeps raw evidence immutable and derives structure beside it.</p></section>}
+    {active && data ? <><section className="center"><div className="incident-header">{editingIncident?.id === active.id && editingIncident.surface === "header" ? <IncidentRenameInput className="header-rename" initialTitle={active.title} onSave={(title) => renameIncidentMutation.mutate({ id: active.id, title })} onCancel={() => setEditingIncident(null)} /> : <h1 onDoubleClick={() => setEditingIncident({ id: active.id, surface: "header" })} title="Double-click to rename">{active.title}</h1>}<button className="secondary" disabled={replayStatus === "running" || evidence.every((item) => !item.contentText)} onClick={() => void replayIncidentParsers()}>{replayStatus === "running" ? "Replaying..." : "Replay parsers"}</button></div>{replayStatus && replayStatus !== "running" ? <p className={replayStatus === "failed" ? "error" : "replay-status"}>{replayStatus === "failed" ? "Parser replay failed. Raw evidence was preserved." : `Parser replay complete for ${replayStatus.split(":")[1]} evidence item(s).`}</p> : null}<EvidenceInbox incidentId={active.id} /><EvidenceStream evidence={evidence} selectedEvidenceId={selectedEvidenceId} onSelectEvidence={selectEvidence} snapshot={data} /></section><RightPanel incidentId={active.id} timeline={timeline} entities={entities} tags={tags} onSelectEvidence={selectEvidence} />{selectedEvidence ? <EvidenceDetail item={selectedEvidence} snapshot={data} onClose={() => selectEvidence(null)} /> : null}</> : <section className="empty"><Inbox size={40} /><h1>Create an incident workspace</h1><p>Paste logs, notes, screenshots, and files. Atlas keeps raw evidence immutable and derives structure beside it.</p></section>}
   </main>;
 }
 
@@ -163,22 +187,27 @@ function EvidenceInbox({ incidentId }: { incidentId: string }) {
   const queryClient = useQueryClient();
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
   const mutation = useMutation({ mutationFn: (payload: { kind: string; source: string; text?: string; file?: File }) => ingestEvidence({ incidentId, ...payload }), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["snapshot"] }); } });
   async function addText(kind = "text") {
     if (!text.trim()) return;
     setError(null);
+    setStatus("Saving evidence...");
     try {
       await mutation.mutateAsync({ kind, source: kind === "note" ? "quick note" : "paste", text });
       setText("");
+      setStatus("Evidence saved. Parser run recorded.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
   }
   async function addFile(file: File, source: string) {
     setError(null);
+    setStatus("Saving attachment...");
     try {
       const textContent = file.type.startsWith("text/") ? await file.text() : undefined;
       await mutation.mutateAsync({ kind: file.type.startsWith("image/") ? "screenshot" : "file", source, file, text: textContent });
+      setStatus(textContent ? "Attachment saved. Parser run recorded." : "Attachment saved.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
@@ -201,16 +230,20 @@ function EvidenceInbox({ incidentId }: { incidentId: string }) {
   return <div className="inbox" onPasteCapture={handlePaste} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); Array.from(event.dataTransfer.files).forEach((file) => void addFile(file, "drop")); }}>
     <div className="drop-label">Paste / drop anything here</div>
     <CodeMirror value={text} height="180px" placeholder="Paste logs, Slack snippets, commands, notes, or incident observations..." onChange={setText} />
-    <div className="actions"><button onClick={() => addText("text")}>Save evidence</button><button onClick={() => addText("note")}>Save quick note</button><span>{mutation.isPending ? "Ingesting and parsing..." : "Deterministic parsers run after save"}</span></div>
+    <div className="actions"><button onClick={() => addText("text")}>Save evidence</button><button onClick={() => addText("note")}>Save quick note</button><span>{mutation.isPending ? status ?? "Ingesting and parsing..." : status ?? "Deterministic parsers run after save"}</span></div>
     {error ? <div className="error">{error}</div> : null}
   </div>;
 }
 
-function EvidenceStream({ evidence, selectedEvidenceId, onSelectEvidence, parserOutputs }: { evidence: Evidence[]; selectedEvidenceId: string | null; onSelectEvidence: (id: string) => void; parserOutputs: Snapshot["parserOutputs"] }) {
-  return <section className="evidence-section"><h2>Evidence</h2><div className="stream">{evidence.map((item) => <EvidenceCard item={item} key={item.id} isSelected={item.id === selectedEvidenceId} onSelect={() => onSelectEvidence(item.id)} isParsed={parserOutputs.some((output) => output.evidenceId === item.id)} />)}</div></section>;
+function EvidenceStream({ evidence, selectedEvidenceId, onSelectEvidence, snapshot }: { evidence: Evidence[]; selectedEvidenceId: string | null; onSelectEvidence: (id: string) => void; snapshot: Snapshot }) {
+  const statuses = evidence.map((item) => getParseStatus(item, snapshot));
+  const parsed = statuses.filter((status) => status === "parsed").length;
+  const failed = statuses.filter((status) => status === "failed").length;
+  const running = statuses.filter((status) => status === "running").length;
+  return <section className="evidence-section"><div className="section-heading"><h2>Evidence</h2><span>{evidence.length} total · {parsed} parsed · {evidence.length - parsed - failed - running} unparsed{failed ? ` · ${failed} failed` : ""}{running ? ` · ${running} running` : ""}</span></div><div className="stream">{evidence.map((item) => <EvidenceCard item={item} key={item.id} isSelected={item.id === selectedEvidenceId} onSelect={() => onSelectEvidence(item.id)} parseStatus={getParseStatus(item, snapshot)} />)}</div></section>;
 }
 
-function EvidenceCard({ item, isSelected, onSelect, isParsed }: { item: Evidence; isSelected: boolean; onSelect: () => void; isParsed: boolean }) {
+function EvidenceCard({ item, isSelected, onSelect, parseStatus }: { item: Evidence; isSelected: boolean; onSelect: () => void; parseStatus: string }) {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<string | null>(null);
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
@@ -255,7 +288,7 @@ function EvidenceCard({ item, isSelected, onSelect, isParsed }: { item: Evidence
     }
   }
   return <article className={isSelected ? "card selected" : "card"} onClick={onSelect}>
-    <div className="card-header"><div className="card-meta"><FileText size={14} />{item.kind} · {item.source} · {new Date(item.createdAt).toLocaleString()}<span className={isParsed ? "parse-badge parsed" : "parse-badge"}>{isParsed ? "parsed" : "unparsed"}</span>{item.attachmentId ? <span className="parse-badge">file</span> : null}</div><div className="card-actions"><button className="icon-button" title="Copy evidence" onClick={(event) => { event.stopPropagation(); void copyEvidence(); }}><Clipboard size={14} /></button><button className={isConfirmingDelete ? "confirm-delete" : "icon-button danger"} title="Delete evidence" onClick={(event) => void deleteEvidenceAfterConfirm(event)}>{isConfirmingDelete ? "Confirm" : <Trash2 size={14} />}</button></div></div>
+    <div className="card-header"><div className="card-meta"><FileText size={14} />{item.kind} · {item.source} · {new Date(item.createdAt).toLocaleString()}<span className={`parse-badge ${parseStatus}`}>{parseStatus}</span>{item.attachmentId ? <span className="parse-badge">file</span> : null}</div><div className="card-actions"><button className="icon-button" title="Copy evidence" onClick={(event) => { event.stopPropagation(); void copyEvidence(); }}><Clipboard size={14} /></button><button className={isConfirmingDelete ? "confirm-delete" : "icon-button danger"} title="Delete evidence" onClick={(event) => void deleteEvidenceAfterConfirm(event)}>{isConfirmingDelete ? "Confirm" : <Trash2 size={14} />}</button></div></div>
     {attachmentUrl && attachment && isImageAttachment ? <img className="attachment-preview" src={attachmentUrl} alt={attachment.name} /> : null}
     {attachmentUrl && attachment && !isImageAttachment ? <a className="attachment-link" href={attachmentUrl} download={attachment.name}>{attachment.name}</a> : null}
     <pre>{item.contentText || (item.attachmentId ? "Attachment stored locally" : "")}</pre>

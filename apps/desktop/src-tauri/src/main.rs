@@ -29,13 +29,22 @@ struct Tag { id: String, incident_id: String, name: String, created_at: String }
 struct ParserOutput { id: String, evidence_id: String, parser_name: String, parser_version: String, output_json: String, created_at: String }
 
 #[derive(Serialize)]
-struct Snapshot { incidents: Vec<Incident>, evidence: Vec<Evidence>, timeline_events: Vec<TimelineEvent>, entities: Vec<Entity>, tags: Vec<Tag>, parser_outputs: Vec<ParserOutput> }
+struct Job { id: String, kind: String, status: String, payload_json: String, error_text: Option<String>, created_at: String, updated_at: String }
+
+#[derive(Serialize)]
+struct Snapshot { incidents: Vec<Incident>, evidence: Vec<Evidence>, timeline_events: Vec<TimelineEvent>, entities: Vec<Entity>, tags: Vec<Tag>, parser_outputs: Vec<ParserOutput>, jobs: Vec<Job> }
 
 #[derive(Deserialize)]
 struct CreateEvidenceInput { incident_id: String, kind: String, source: String, content_text: Option<String>, metadata_json: Option<String>, attachment_name: Option<String>, attachment_mime_type: Option<String>, attachment_base64: Option<String> }
 
 #[derive(Deserialize)]
 struct ParserOutputInput { id: String, evidence_id: String, parser_name: String, parser_version: String, output_json: String, timeline_events_json: String, entities_json: String }
+
+#[derive(Deserialize)]
+struct CreateJobInput { id: String, kind: String, status: String, payload_json: String }
+
+#[derive(Deserialize)]
+struct UpdateJobInput { id: String, status: String, error_text: Option<String> }
 
 #[derive(Deserialize)]
 struct DerivedTimelineInput { id: String, incident_id: String, timestamp: String, title: String, description: String, confidence: f64, source_evidence_id: String, source_parser_output_id: String }
@@ -69,8 +78,24 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         CREATE TABLE IF NOT EXISTS tags (id TEXT PRIMARY KEY, incident_id TEXT NOT NULL, name TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(incident_id, name));
         CREATE TABLE IF NOT EXISTS evidence_tags (evidence_id TEXT NOT NULL, tag_id TEXT NOT NULL, PRIMARY KEY(evidence_id, tag_id));
         CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        ALTER TABLE jobs ADD COLUMN error_text TEXT;
         CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(kind, ref_id UNINDEXED, incident_id UNINDEXED, title, body);
-    "#).map_err(|error| error.to_string())?;
+    "#).or_else(|error| if error.to_string().contains("duplicate column name") { Ok(()) } else { Err(error) }).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn create_job(state: tauri::State<AppState>, input: CreateJobInput) -> Result<(), String> {
+    let _guard = state.lock.lock().map_err(|error| error.to_string())?;
+    let created_at = now();
+    open(&state.db_path)?.execute("INSERT INTO jobs (id, kind, status, payload_json, error_text, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?5)", params![input.id, input.kind, input.status, input.payload_json, created_at]).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn update_job(state: tauri::State<AppState>, input: UpdateJobInput) -> Result<(), String> {
+    let _guard = state.lock.lock().map_err(|error| error.to_string())?;
+    open(&state.db_path)?.execute("UPDATE jobs SET status = ?1, error_text = ?2, updated_at = ?3 WHERE id = ?4", params![input.status, input.error_text, now(), input.id]).map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -240,7 +265,8 @@ fn load_snapshot(state: tauri::State<AppState>) -> Result<Snapshot, String> {
     let entities = conn.prepare("SELECT id,incident_id,type,name,confidence,source_evidence_id,source_parser_output_id,created_at FROM entities ORDER BY created_at DESC").map_err(|e| e.to_string())?.query_map([], |r| Ok(Entity { id: r.get(0)?, incident_id: r.get(1)?, entity_type: r.get(2)?, name: r.get(3)?, confidence: r.get(4)?, source_evidence_id: r.get(5)?, source_parser_output_id: r.get(6)?, created_at: r.get(7)? })).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
     let tags = conn.prepare("SELECT id,incident_id,name,created_at FROM tags ORDER BY name ASC").map_err(|e| e.to_string())?.query_map([], |r| Ok(Tag { id: r.get(0)?, incident_id: r.get(1)?, name: r.get(2)?, created_at: r.get(3)? })).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
     let parser_outputs = conn.prepare("SELECT id,evidence_id,parser_name,parser_version,output_json,created_at FROM parser_outputs ORDER BY created_at DESC").map_err(|e| e.to_string())?.query_map([], |r| Ok(ParserOutput { id: r.get(0)?, evidence_id: r.get(1)?, parser_name: r.get(2)?, parser_version: r.get(3)?, output_json: r.get(4)?, created_at: r.get(5)? })).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
-    Ok(Snapshot { incidents, evidence, timeline_events, entities, tags, parser_outputs })
+    let jobs = conn.prepare("SELECT id,kind,status,payload_json,error_text,created_at,updated_at FROM jobs ORDER BY created_at DESC").map_err(|e| e.to_string())?.query_map([], |r| Ok(Job { id: r.get(0)?, kind: r.get(1)?, status: r.get(2)?, payload_json: r.get(3)?, error_text: r.get(4)?, created_at: r.get(5)?, updated_at: r.get(6)? })).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    Ok(Snapshot { incidents, evidence, timeline_events, entities, tags, parser_outputs, jobs })
 }
 
 #[tauri::command]
@@ -276,7 +302,7 @@ fn main() {
             app.manage(AppState { db_path, attachments_dir: app_dir.join("attachments"), lock: Mutex::new(()) });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![create_incident, rename_incident, add_evidence, save_parser_output, add_tag, delete_tag, clear_evidence_parsers, delete_evidence, delete_incident, load_snapshot, search, load_attachment])
+        .invoke_handler(tauri::generate_handler![create_incident, rename_incident, add_evidence, save_parser_output, create_job, update_job, add_tag, delete_tag, clear_evidence_parsers, delete_evidence, delete_incident, load_snapshot, search, load_attachment])
         .run(tauri::generate_context!())
         .expect("failed to run atlas");
 }

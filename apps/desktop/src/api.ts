@@ -7,14 +7,16 @@ export type TimelineEventDto = { id: string; incident_id: string; timestamp: str
 export type EntityDto = { id: string; incident_id: string; entity_type: string; name: string; confidence: number; source_evidence_id: string | null; source_parser_output_id: string | null; created_at: string };
 export type TagDto = { id: string; incident_id: string; name: string; created_at: string };
 export type ParserOutputDto = { id: string; evidence_id: string; parser_name: string; parser_version: string; output_json: string; created_at: string };
+export type JobDto = { id: string; kind: string; status: string; payload_json: string; error_text: string | null; created_at: string; updated_at: string };
 
 export type ParserOutputRecord = { id: string; evidenceId: string; parserName: string; parserVersion: string; output: ParsedOutput; createdAt: string };
 export type Tag = { id: string; incidentId: string; name: string; createdAt: string };
+export type Job = { id: string; kind: string; status: string; payload: Record<string, unknown>; errorText: string | null; createdAt: string; updatedAt: string };
 export type AttachmentData = { name: string; mimeType: string; base64: string };
 export type SearchResult = { kind: "evidence" | "timeline" | "entity" | string; refId: string; title: string; snippet: string };
 
-export type SnapshotDto = { incidents: IncidentDto[]; evidence: EvidenceDto[]; timeline_events: TimelineEventDto[]; entities: EntityDto[]; tags: TagDto[]; parser_outputs: ParserOutputDto[] };
-export type Snapshot = { incidents: Incident[]; evidence: Evidence[]; timelineEvents: TimelineEvent[]; entities: Entity[]; tags: Tag[]; parserOutputs: ParserOutputRecord[] };
+export type SnapshotDto = { incidents: IncidentDto[]; evidence: EvidenceDto[]; timeline_events: TimelineEventDto[]; entities: EntityDto[]; tags: TagDto[]; parser_outputs: ParserOutputDto[]; jobs: JobDto[] };
+export type Snapshot = { incidents: Incident[]; evidence: Evidence[]; timelineEvents: TimelineEvent[]; entities: Entity[]; tags: Tag[]; parserOutputs: ParserOutputRecord[]; jobs: Job[] };
 
 function parseMetadata(value: string): Record<string, unknown> {
   try {
@@ -58,7 +60,7 @@ export function toEntity(row: EntityDto): Entity {
 
 export async function loadSnapshot(): Promise<Snapshot> {
   const dto = await invoke<SnapshotDto>("load_snapshot");
-  return { incidents: dto.incidents.map(toIncident), evidence: dto.evidence.map(toEvidence), timelineEvents: dto.timeline_events.map(toTimelineEvent), entities: dto.entities.map(toEntity), tags: dto.tags.map((tag) => ({ id: tag.id, incidentId: tag.incident_id, name: tag.name, createdAt: tag.created_at })), parserOutputs: dto.parser_outputs.map((output) => ({ id: output.id, evidenceId: output.evidence_id, parserName: output.parser_name, parserVersion: output.parser_version, output: parseOutput(output.output_json), createdAt: output.created_at })) };
+  return { incidents: dto.incidents.map(toIncident), evidence: dto.evidence.map(toEvidence), timelineEvents: dto.timeline_events.map(toTimelineEvent), entities: dto.entities.map(toEntity), tags: dto.tags.map((tag) => ({ id: tag.id, incidentId: tag.incident_id, name: tag.name, createdAt: tag.created_at })), parserOutputs: dto.parser_outputs.map((output) => ({ id: output.id, evidenceId: output.evidence_id, parserName: output.parser_name, parserVersion: output.parser_version, output: parseOutput(output.output_json), createdAt: output.created_at })), jobs: dto.jobs.map((job) => ({ id: job.id, kind: job.kind, status: job.status, payload: parseMetadata(job.payload_json), errorText: job.error_text, createdAt: job.created_at, updatedAt: job.updated_at })) };
 }
 
 export async function createIncident(title: string): Promise<Incident> {
@@ -75,6 +77,14 @@ export async function addEvidence(input: { incidentId: string; kind: Evidence["k
 
 export async function saveParserOutput(input: { id: string; evidenceId: string; parserName: string; parserVersion: string; output: ParsedOutput; timelineEvents: TimelineEvent[]; entities: Entity[] }) {
   await invoke("save_parser_output", { input: { id: input.id, evidence_id: input.evidenceId, parser_name: input.parserName, parser_version: input.parserVersion, output_json: JSON.stringify(input.output), timeline_events_json: JSON.stringify(input.timelineEvents.map((event) => ({ id: event.id, incident_id: event.incidentId, timestamp: event.timestamp, title: event.title, description: event.description, confidence: event.confidence, source_evidence_id: event.sourceEvidenceId, source_parser_output_id: event.sourceParserOutputId }))), entities_json: JSON.stringify(input.entities.map((entity) => ({ id: entity.id, incident_id: entity.incidentId, entity_type: entity.type, name: entity.name, confidence: entity.confidence, source_evidence_id: entity.sourceEvidenceId, source_parser_output_id: entity.sourceParserOutputId }))) } });
+}
+
+export async function createJob(input: { id: string; kind: string; status: string; payload: Record<string, unknown> }) {
+  await invoke("create_job", { input: { id: input.id, kind: input.kind, status: input.status, payload_json: JSON.stringify(input.payload) } });
+}
+
+export async function updateJob(input: { id: string; status: string; errorText?: string | null }) {
+  await invoke("update_job", { input: { id: input.id, status: input.status, error_text: input.errorText ?? null } });
 }
 
 export async function clearEvidenceParsers(evidenceId: string) { await invoke("clear_evidence_parsers", { evidenceId }); }
