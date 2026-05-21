@@ -1,32 +1,32 @@
 {
-  "name": "@atlas/desktop",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "vite --host 127.0.0.1",
-    "build": "tsc && vite build",
-    "check": "tsc --noEmit",
-    "tauri": "tauri"
-  },
-  "dependencies": {
-    "@atlas/core": "workspace:*",
-    "@atlas/shared": "workspace:*",
-    "@codemirror/lang-javascript": "latest",
-    "@tauri-apps/api": "latest",
-    "@tanstack/react-query": "latest",
-    "@uiw/react-codemirror": "latest",
-    "lucide-react": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "zustand": "latest"
-  },
-  "devDependencies": {
-    "@tauri-apps/cli": "latest",
-    "@types/react": "latest",
-    "@types/react-dom": "latest",
-    "@vitejs/plugin-react": "latest",
-    "typescript": "latest",
-    "vite": "latest"
-  }
+	"name": "@atlas/desktop",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "vite --host 127.0.0.1",
+		"build": "tsc && vite build",
+		"check": "tsc --noEmit",
+		"tauri": "tauri"
+	},
+	"dependencies": {
+		"@atlas/core": "workspace:*",
+		"@atlas/shared": "workspace:*",
+		"@codemirror/lang-javascript": "latest",
+		"@tauri-apps/api": "latest",
+		"@tanstack/react-query": "latest",
+		"@uiw/react-codemirror": "latest",
+		"lucide-react": "latest",
+		"react": "latest",
+		"react-dom": "latest",
+		"zustand": "latest"
+	},
+	"devDependencies": {
+		"@tauri-apps/cli": "latest",
+		"@types/react": "latest",
+		"@types/react-dom": "latest",
+		"@vitejs/plugin-react": "latest",
+		"typescript": "latest",
+		"vite": "latest"
+	}
 }

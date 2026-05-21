@@ -1,18 +1,21 @@
 {
-  "name": "atlas",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "turbo dev",
-    "build": "turbo build",
-    "check": "turbo check",
-    "desktop": "pnpm --filter @atlas/desktop tauri dev"
-  },
-  "packageManager": "pnpm@10.11.0",
-  "devDependencies": {
-    "@types/node": "latest",
-    "turbo": "latest",
-    "typescript": "latest"
-  }
+	"name": "atlas",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "turbo dev",
+		"build": "turbo build",
+		"check": "turbo check",
+		"format": "prettier --write .",
+		"format:check": "prettier --check .",
+		"desktop": "pnpm --filter @atlas/desktop tauri dev"
+	},
+	"packageManager": "pnpm@10.11.0",
+	"devDependencies": {
+		"@types/node": "latest",
+		"prettier": "latest",
+		"turbo": "latest",
+		"typescript": "latest"
+	}
 }
