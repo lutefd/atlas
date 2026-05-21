@@ -55,6 +55,9 @@ code { color: #627044; background: #eef5d5; padding: 3px 6px; border-radius: 8px
 .panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
 .panel-heading h2 { margin: 0; }
 .panel-heading button { background: #172018; color: #f7f2e8; border-radius: 10px; padding: 7px 9px; font-size: 12px; font-weight: 800; }
+.search-filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+.search-filters button { background: rgba(23,32,24,0.08); color: #172018; border-radius: 999px; padding: 5px 8px; font-size: 12px; font-weight: 800; }
+.search-filters button.active { background: #172018; color: #f7f2e8; }
 input, textarea, select { width: 100%; border: 1px solid #cfc6b6; background: #fffaf0; border-radius: 12px; padding: 10px; }
 textarea { min-height: 72px; resize: vertical; }
 .result, .event button { display: grid; width: 100%; gap: 4px; padding: 10px 0; border-bottom: 1px solid #ded5c6; background: transparent; color: inherit; text-align: left; min-width: 0; }

@@ -179,7 +179,10 @@ fn add_evidence(state: tauri::State<AppState>, input: CreateEvidenceInput) -> Re
     }
     let evidence = Evidence { id: evidence_id, incident_id: input.incident_id, kind: input.kind, source: input.source, content_text: input.content_text, content_hash: hash, created_at: now(), metadata_json: input.metadata_json.unwrap_or_else(|| "{}".into()), attachment_id };
     conn.execute("INSERT INTO evidence VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)", params![evidence.id, evidence.incident_id, evidence.kind, evidence.source, evidence.content_text, evidence.content_hash, evidence.created_at, evidence.metadata_json, evidence.attachment_id]).map_err(|error| error.to_string())?;
-    conn.execute("INSERT INTO search_index(kind, ref_id, incident_id, title, body) VALUES ('evidence', ?1, ?2, ?3, ?4)", params![evidence.id, evidence.incident_id, evidence.source, evidence.content_text]).map_err(|error| error.to_string())?;
+    conn.execute("INSERT INTO search_index(kind, ref_id, incident_id, title, body) VALUES ('evidence', ?1, ?2, ?3, ?4)", params![evidence.id, evidence.incident_id, evidence.source, format!("{}\n{}", evidence.content_text.clone().unwrap_or_default(), evidence.metadata_json)]).map_err(|error| error.to_string())?;
+    if let Some(attachment_id) = &evidence.attachment_id {
+        conn.execute("INSERT INTO search_index(kind, ref_id, incident_id, title, body) VALUES ('attachment', ?1, ?2, ?3, ?4)", params![evidence.id, evidence.incident_id, attachment_id, evidence.metadata_json]).map_err(|error| error.to_string())?;
+    }
     Ok(evidence)
 }
 
@@ -277,10 +280,13 @@ fn delete_incident(state: tauri::State<AppState>, incident_id: String) -> Result
 }
 
 fn rebuild_search_index(conn: &Connection, incident_id: &str) -> Result<(), String> {
-    let mut evidence_stmt = conn.prepare("SELECT id, source, content_text FROM evidence WHERE incident_id = ?1").map_err(|error| error.to_string())?;
-    let evidence_rows = evidence_stmt.query_map(params![incident_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?))).map_err(|error| error.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
-    for (id, source, content_text) in evidence_rows {
-        conn.execute("INSERT INTO search_index(kind, ref_id, incident_id, title, body) VALUES ('evidence', ?1, ?2, ?3, ?4)", params![id, incident_id, source, content_text]).map_err(|error| error.to_string())?;
+    let mut evidence_stmt = conn.prepare("SELECT id, source, content_text, metadata_json, attachment_id FROM evidence WHERE incident_id = ?1").map_err(|error| error.to_string())?;
+    let evidence_rows = evidence_stmt.query_map(params![incident_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?, row.get::<_, String>(3)?, row.get::<_, Option<String>>(4)?))).map_err(|error| error.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    for (id, source, content_text, metadata_json, attachment_id) in evidence_rows {
+        conn.execute("INSERT INTO search_index(kind, ref_id, incident_id, title, body) VALUES ('evidence', ?1, ?2, ?3, ?4)", params![id, incident_id, source, format!("{}\n{}", content_text.unwrap_or_default(), metadata_json)]).map_err(|error| error.to_string())?;
+        if attachment_id.is_some() {
+            conn.execute("INSERT INTO search_index(kind, ref_id, incident_id, title, body) VALUES ('attachment', ?1, ?2, ?3, ?4)", params![id, incident_id, source, metadata_json]).map_err(|error| error.to_string())?;
+        }
     }
 
     let mut timeline_stmt = conn.prepare("SELECT id, title, description FROM timeline_events WHERE incident_id = ?1").map_err(|error| error.to_string())?;
@@ -289,10 +295,10 @@ fn rebuild_search_index(conn: &Connection, incident_id: &str) -> Result<(), Stri
         conn.execute("INSERT INTO search_index(kind, ref_id, incident_id, title, body) VALUES ('timeline', ?1, ?2, ?3, ?4)", params![id, incident_id, title, description]).map_err(|error| error.to_string())?;
     }
 
-    let mut entity_stmt = conn.prepare("SELECT id, name FROM entities WHERE incident_id = ?1").map_err(|error| error.to_string())?;
-    let entity_rows = entity_stmt.query_map(params![incident_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))).map_err(|error| error.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
-    for (id, name) in entity_rows {
-        conn.execute("INSERT INTO search_index(kind, ref_id, incident_id, title, body) VALUES ('entity', ?1, ?2, ?3, '')", params![id, incident_id, name]).map_err(|error| error.to_string())?;
+    let mut entity_stmt = conn.prepare("SELECT id, type, name FROM entities WHERE incident_id = ?1").map_err(|error| error.to_string())?;
+    let entity_rows = entity_stmt.query_map(params![incident_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))).map_err(|error| error.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    for (id, entity_type, name) in entity_rows {
+        conn.execute("INSERT INTO search_index(kind, ref_id, incident_id, title, body) VALUES ('entity', ?1, ?2, ?3, ?4)", params![id, incident_id, name, entity_type]).map_err(|error| error.to_string())?;
     }
 
     Ok(())

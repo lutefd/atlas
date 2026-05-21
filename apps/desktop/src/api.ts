@@ -13,7 +13,7 @@ export type ParserOutputRecord = { id: string; evidenceId: string; parserName: s
 export type Tag = { id: string; incidentId: string; name: string; createdAt: string };
 export type Job = { id: string; kind: string; status: string; payload: Record<string, unknown>; errorText: string | null; createdAt: string; updatedAt: string };
 export type AttachmentData = { name: string; mimeType: string; base64: string };
-export type SearchResult = { kind: "evidence" | "timeline" | "entity" | string; refId: string; title: string; snippet: string };
+export type SearchResult = { kind: "evidence" | "timeline" | "entity" | "attachment" | string; refId: string; title: string; snippet: string };
 
 export type SnapshotDto = { incidents: IncidentDto[]; evidence: EvidenceDto[]; timeline_events: TimelineEventDto[]; entities: EntityDto[]; tags: TagDto[]; parser_outputs: ParserOutputDto[]; jobs: JobDto[] };
 export type Snapshot = { incidents: Incident[]; evidence: Evidence[]; timelineEvents: TimelineEvent[]; entities: Entity[]; tags: Tag[]; parserOutputs: ParserOutputRecord[]; jobs: Job[] };
