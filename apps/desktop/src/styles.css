@@ -28,13 +28,14 @@ button {
 }
 .shell {
 	display: grid;
-	grid-template-columns: 250px minmax(460px, 1fr) 360px;
-	min-height: 100vh;
+	grid-template-columns: 250px minmax(0, 1fr) 360px;
+	height: 100vh;
 }
 .sidebar {
 	background: #172018;
 	color: #f7f2e8;
 	padding: 20px;
+	overflow: auto;
 }
 .brand {
 	font-size: 24px;
@@ -181,6 +182,60 @@ h1 {
 	flex-wrap: wrap;
 	justify-content: flex-end;
 	gap: 8px;
+}
+.export-menu {
+	position: relative;
+}
+.export-menu summary {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	background: #172018;
+	color: #f7f2e8;
+	border-radius: 12px;
+	padding: 10px 12px;
+	font-weight: 700;
+	list-style: none;
+	cursor: pointer;
+}
+.export-menu summary::-webkit-details-marker {
+	display: none;
+}
+.export-menu summary::after {
+	content: "▾";
+	font-size: 11px;
+	opacity: 0.72;
+}
+.export-menu[open] summary::after {
+	transform: rotate(180deg);
+}
+.export-menu div {
+	position: absolute;
+	top: calc(100% + 6px);
+	right: 0;
+	z-index: 5;
+	display: grid;
+	min-width: 210px;
+	padding: 6px;
+	background: #172018;
+	border-radius: 14px;
+	box-shadow: 0 16px 42px rgba(23, 32, 24, 0.24);
+}
+.export-menu button {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	background: transparent;
+	color: #f7f2e8;
+	border-radius: 10px;
+	padding: 9px 10px;
+	font-size: 13px;
+	font-weight: 800;
+	text-align: left;
+}
+.export-menu button:hover {
+	background: rgba(255, 255, 255, 0.1);
 }
 .replay-status {
 	color: #627044;

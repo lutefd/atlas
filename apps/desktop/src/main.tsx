@@ -767,26 +767,26 @@ function Workspace() {
 								</h1>
 							)}
 							<div className="header-actions">
-								<button
-									className="secondary"
-									onClick={() => void exportActiveIncident()}
-								>
-									Export
-								</button>
-								<button
-									className="secondary"
-									title="Download a detailed Markdown document with embedded attachment data"
-									onClick={() => void exportActiveIncidentDocument()}
-								>
-									<Download size={14} /> Export document
-								</button>
-								<button
-									className="secondary"
-									title="Copy a concise incident update for a Slack thread"
-									onClick={() => void copyActiveIncidentSlackMessage()}
-								>
-									<Clipboard size={14} /> Slack message
-								</button>
+								<details className="export-menu">
+									<summary>Export</summary>
+									<div>
+										<button onClick={() => void exportActiveIncident()}>
+											Raw incident folder
+										</button>
+										<button
+											title="Download a detailed Markdown document with embedded attachment data"
+											onClick={() => void exportActiveIncidentDocument()}
+										>
+											<Download size={14} /> Markdown document
+										</button>
+										<button
+											title="Copy a concise incident update for a Slack thread"
+											onClick={() => void copyActiveIncidentSlackMessage()}
+										>
+											<Clipboard size={14} /> Slack message
+										</button>
+									</div>
+								</details>
 								<button
 									className="secondary"
 									disabled={
