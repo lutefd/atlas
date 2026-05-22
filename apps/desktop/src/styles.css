@@ -183,6 +183,12 @@ h1 {
 	justify-content: flex-end;
 	gap: 8px;
 }
+.header-actions > .secondary,
+.export-menu summary {
+	justify-content: center;
+	min-width: 132px;
+	height: 42px;
+}
 .export-menu {
 	position: relative;
 }

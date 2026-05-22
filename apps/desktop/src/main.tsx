@@ -18,7 +18,7 @@ import {
 	Trash2,
 	X,
 } from "lucide-react";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { create } from "zustand";
 import {
@@ -492,6 +492,8 @@ function Workspace() {
 	const queryClient = useQueryClient();
 	const [incidentStatus, setIncidentStatus] = useState<string | null>(null);
 	const [replayStatus, setReplayStatus] = useState<string | null>(null);
+	const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+	const exportMenuRef = useRef<HTMLDetailsElement | null>(null);
 	const [confirmingIncidentId, setConfirmingIncidentId] = useState<
 		string | null
 	>(null);
@@ -553,6 +555,15 @@ function Workspace() {
 		}, 4000);
 		return () => window.clearTimeout(timeout);
 	}, [incidentStatus, confirmingIncidentId]);
+	useEffect(() => {
+		if (!isExportMenuOpen) return;
+		function closeMenu(event: PointerEvent) {
+			if (exportMenuRef.current?.contains(event.target as Node)) return;
+			setIsExportMenuOpen(false);
+		}
+		window.addEventListener("pointerdown", closeMenu);
+		return () => window.removeEventListener("pointerdown", closeMenu);
+	}, [isExportMenuOpen]);
 	async function deleteIncidentAfterConfirm(
 		event: React.MouseEvent,
 		incident: Incident,
@@ -767,26 +778,45 @@ function Workspace() {
 								</h1>
 							)}
 							<div className="header-actions">
-								<details className="export-menu">
-									<summary>Export</summary>
-									<div>
-										<button onClick={() => void exportActiveIncident()}>
-											Raw incident folder
-										</button>
-										<button
-											title="Download a detailed Markdown document with embedded attachment data"
-											onClick={() => void exportActiveIncidentDocument()}
-										>
-											<Download size={14} /> Markdown document
-										</button>
-										<button
-											title="Copy a concise incident update for a Slack thread"
-											onClick={() => void copyActiveIncidentSlackMessage()}
-										>
-											<Clipboard size={14} /> Slack message
-										</button>
-									</div>
-								</details>
+							<details
+								className="export-menu"
+								open={isExportMenuOpen}
+								ref={exportMenuRef}
+								onToggle={(event) =>
+									setIsExportMenuOpen(event.currentTarget.open)
+								}
+							>
+								<summary>Export</summary>
+								<div>
+									<button
+										onClick={() => {
+											setIsExportMenuOpen(false);
+											void exportActiveIncident();
+										}}
+									>
+										<FileText size={14} />
+										Raw incident folder
+									</button>
+									<button
+										title="Download a detailed Markdown document with embedded attachment data"
+										onClick={() => {
+											setIsExportMenuOpen(false);
+											void exportActiveIncidentDocument();
+										}}
+									>
+										<Download size={14} /> Markdown document
+									</button>
+									<button
+										title="Copy a concise incident update for a Slack thread"
+										onClick={() => {
+											setIsExportMenuOpen(false);
+											void copyActiveIncidentSlackMessage();
+										}}
+									>
+										<Clipboard size={14} /> Slack message
+									</button>
+								</div>
+							</details>
 								<button
 									className="secondary"
 									disabled={
