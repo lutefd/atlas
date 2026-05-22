@@ -1,0 +1,29 @@
+.modal-backdrop {
+	position: fixed;
+	inset: 0;
+	z-index: 20;
+	display: grid;
+	place-items: center;
+	background: rgba(23, 32, 24, 0.42);
+	padding: 20px;
+}
+.modal {
+	width: min(520px, 100%);
+	max-height: min(680px, 100vh - 40px);
+	overflow: auto;
+	background: #fffaf0;
+	border: 1px solid #d8d0c1;
+	border-radius: 20px;
+	padding: 16px;
+	box-shadow: 0 24px 80px rgba(23, 32, 24, 0.28);
+}
+.modal-header {
+	display: flex;
+	align-items: start;
+	justify-content: space-between;
+	gap: 12px;
+	margin-bottom: 12px;
+}
+.modal-header h2 {
+	margin: 0;
+}
