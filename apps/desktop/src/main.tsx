@@ -564,6 +564,11 @@ function Workspace() {
 		window.addEventListener("pointerdown", closeMenu);
 		return () => window.removeEventListener("pointerdown", closeMenu);
 	}, [isExportMenuOpen]);
+	useEffect(() => {
+		if (!replayStatus || replayStatus === "running") return;
+		const timeout = window.setTimeout(() => setReplayStatus(null), 4000);
+		return () => window.clearTimeout(timeout);
+	}, [replayStatus]);
 	async function deleteIncidentAfterConfirm(
 		event: React.MouseEvent,
 		incident: Incident,
@@ -586,16 +591,25 @@ function Workspace() {
 	}
 	async function replayIncidentParsers() {
 		if (!activeId || replayStatus === "running") return;
-		const replayableEvidence = evidence.filter((item) =>
-			Boolean(item.contentText),
-		);
+		const canOcrImages = await hasOcr();
+		let replayedCount = 0;
 		setReplayStatus("running");
 		try {
-			for (const item of replayableEvidence) {
-				await replayEvidenceParsers(item);
+			for (const item of evidence) {
+				if (item.contentText) {
+					await replayEvidenceParsers(item);
+					replayedCount += 1;
+					continue;
+				}
+				if (!item.attachmentId || !canOcrImages) continue;
+				const attachment = await loadAttachment(item.id);
+				if (!attachment?.mimeType.startsWith("image/")) continue;
+				await clearEvidenceParsers(item.id);
+				await runOcrForEvidence(item);
+				replayedCount += 1;
 			}
 			await queryClient.invalidateQueries({ queryKey: ["snapshot"] });
-			setReplayStatus(`complete:${replayableEvidence.length}`);
+			setReplayStatus(`complete:${replayedCount}`);
 		} catch (caught) {
 			console.error("Incident parser replay failed:", caught);
 			setReplayStatus("failed");
@@ -778,45 +792,45 @@ function Workspace() {
 								</h1>
 							)}
 							<div className="header-actions">
-							<details
-								className="export-menu"
-								open={isExportMenuOpen}
-								ref={exportMenuRef}
-								onToggle={(event) =>
-									setIsExportMenuOpen(event.currentTarget.open)
-								}
-							>
-								<summary>Export</summary>
-								<div>
-									<button
-										onClick={() => {
-											setIsExportMenuOpen(false);
-											void exportActiveIncident();
-										}}
-									>
-										<FileText size={14} />
-										Raw incident folder
-									</button>
-									<button
-										title="Download a detailed Markdown document with embedded attachment data"
-										onClick={() => {
-											setIsExportMenuOpen(false);
-											void exportActiveIncidentDocument();
-										}}
-									>
-										<Download size={14} /> Markdown document
-									</button>
-									<button
-										title="Copy a concise incident update for a Slack thread"
-										onClick={() => {
-											setIsExportMenuOpen(false);
-											void copyActiveIncidentSlackMessage();
-										}}
-									>
-										<Clipboard size={14} /> Slack message
-									</button>
-								</div>
-							</details>
+								<details
+									className="export-menu"
+									open={isExportMenuOpen}
+									ref={exportMenuRef}
+									onToggle={(event) =>
+										setIsExportMenuOpen(event.currentTarget.open)
+									}
+								>
+									<summary>Export</summary>
+									<div>
+										<button
+											onClick={() => {
+												setIsExportMenuOpen(false);
+												void exportActiveIncident();
+											}}
+										>
+											<FileText size={14} />
+											Raw incident folder
+										</button>
+										<button
+											title="Download a detailed Markdown document with embedded attachment data"
+											onClick={() => {
+												setIsExportMenuOpen(false);
+												void exportActiveIncidentDocument();
+											}}
+										>
+											<Download size={14} /> Markdown document
+										</button>
+										<button
+											title="Copy a concise incident update for a Slack thread"
+											onClick={() => {
+												setIsExportMenuOpen(false);
+												void copyActiveIncidentSlackMessage();
+											}}
+										>
+											<Clipboard size={14} /> Slack message
+										</button>
+									</div>
+								</details>
 								<button
 									className="secondary"
 									disabled={
