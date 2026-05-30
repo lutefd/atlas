@@ -24,7 +24,16 @@ export async function updateIncidentOps(input: {
 	pendingActions: string;
 }): Promise<Incident> {
 	return toIncident(
-		await invoke<import("./dto").IncidentDto>("update_incident_ops", input),
+		await invoke<import("./dto").IncidentDto>("update_incident_ops", {
+			input: {
+				incident_id: input.incidentId,
+				status: input.status,
+				severity: input.severity,
+				impact: input.impact,
+				mitigation: input.mitigation,
+				pending_actions: input.pendingActions,
+			},
+		}),
 	);
 }
 
