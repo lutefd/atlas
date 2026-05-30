@@ -90,8 +90,8 @@ textarea {
 }
 .event {
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) auto;
-	gap: 8px;
+	grid-template-columns: minmax(0, 1fr);
+	gap: 6px;
 	align-items: start;
 	border-bottom: 1px solid #ded5c6;
 }
@@ -132,17 +132,26 @@ time {
 .manual-event-actions,
 .event-actions {
 	display: flex;
+	flex-wrap: wrap;
 	gap: 6px;
-	align-self: center;
+	justify-content: flex-end;
+	min-width: 0;
 }
 .manual-event-actions button,
 .event-actions button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 	background: rgba(23, 32, 24, 0.08);
 	border-radius: 9px;
-	padding: 7px 9px;
+	min-width: 76px;
+	min-height: 40px;
+	padding: 7px 10px;
 	color: #172018;
 	font-size: 12px;
 	font-weight: 800;
+	line-height: 1;
+	text-align: center;
 }
 .entity-link:hover {
 	background: #627044;
