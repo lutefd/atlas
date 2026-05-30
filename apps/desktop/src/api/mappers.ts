@@ -51,6 +51,11 @@ export function toIncident(row: IncidentDto): Incident {
 	return {
 		id: row.id,
 		title: row.title,
+		status: row.status,
+		severity: row.severity,
+		impact: row.impact,
+		mitigation: row.mitigation,
+		pendingActions: row.pending_actions,
 		createdAt: row.created_at,
 		updatedAt: row.updated_at,
 	};

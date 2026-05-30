@@ -8,14 +8,19 @@ use serde_json;
 pub fn load_snapshot(state: tauri::State<AppState>) -> Result<Snapshot, String> {
     let conn = db::open(&state.db_path)?;
     let incidents = conn
-        .prepare("SELECT id,title,created_at,updated_at FROM incidents ORDER BY created_at DESC")
+        .prepare("SELECT id,title,status,severity,impact,mitigation,pending_actions,created_at,updated_at FROM incidents ORDER BY created_at DESC")
         .map_err(|e| e.to_string())?
         .query_map([], |r| {
             Ok(Incident {
                 id: r.get(0)?,
                 title: r.get(1)?,
-                created_at: r.get(2)?,
-                updated_at: r.get(3)?,
+                status: r.get(2)?,
+                severity: r.get(3)?,
+                impact: r.get(4)?,
+                mitigation: r.get(5)?,
+                pending_actions: r.get(6)?,
+                created_at: r.get(7)?,
+                updated_at: r.get(8)?,
             })
         })
         .map_err(|e| e.to_string())?

@@ -55,7 +55,12 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(r#"
         PRAGMA journal_mode = WAL;
         PRAGMA foreign_keys = ON;
-        CREATE TABLE IF NOT EXISTS incidents (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS incidents (id TEXT PRIMARY KEY, title TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'investigating', severity TEXT NOT NULL DEFAULT 'unknown', impact TEXT NOT NULL DEFAULT '', mitigation TEXT NOT NULL DEFAULT '', pending_actions TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        ALTER TABLE incidents ADD COLUMN status TEXT NOT NULL DEFAULT 'investigating';
+        ALTER TABLE incidents ADD COLUMN severity TEXT NOT NULL DEFAULT 'unknown';
+        ALTER TABLE incidents ADD COLUMN impact TEXT NOT NULL DEFAULT '';
+        ALTER TABLE incidents ADD COLUMN mitigation TEXT NOT NULL DEFAULT '';
+        ALTER TABLE incidents ADD COLUMN pending_actions TEXT NOT NULL DEFAULT '';
         CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, evidence_id TEXT, path TEXT NOT NULL, mime_type TEXT, size_bytes INTEGER, created_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS evidence (id TEXT PRIMARY KEY, incident_id TEXT NOT NULL, kind TEXT NOT NULL, source TEXT NOT NULL, content_text TEXT, content_hash TEXT NOT NULL, created_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', attachment_id TEXT, FOREIGN KEY (incident_id) REFERENCES incidents(id));
         CREATE TABLE IF NOT EXISTS parser_outputs (id TEXT PRIMARY KEY, evidence_id TEXT NOT NULL, parser_name TEXT NOT NULL, parser_version TEXT NOT NULL, output_json TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (evidence_id) REFERENCES evidence(id));

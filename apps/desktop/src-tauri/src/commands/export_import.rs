@@ -13,7 +13,7 @@ fn export_incident_into(
     db::remove_dir_if_exists(&export_dir)?;
     fs::create_dir_all(export_dir.join("attachments")).map_err(|error| error.to_string())?;
 
-    let incident = conn.query_row("SELECT id,title,created_at,updated_at FROM incidents WHERE id = ?1", params![&incident_id], |row| Ok(serde_json::json!({ "id": row.get::<_, String>(0)?, "title": row.get::<_, String>(1)?, "created_at": row.get::<_, String>(2)?, "updated_at": row.get::<_, String>(3)? }))).map_err(|error| error.to_string())?;
+    let incident = conn.query_row("SELECT id,title,status,severity,impact,mitigation,pending_actions,created_at,updated_at FROM incidents WHERE id = ?1", params![&incident_id], |row| Ok(serde_json::json!({ "id": row.get::<_, String>(0)?, "title": row.get::<_, String>(1)?, "status": row.get::<_, String>(2)?, "severity": row.get::<_, String>(3)?, "impact": row.get::<_, String>(4)?, "mitigation": row.get::<_, String>(5)?, "pending_actions": row.get::<_, String>(6)?, "created_at": row.get::<_, String>(7)?, "updated_at": row.get::<_, String>(8)? }))).map_err(|error| error.to_string())?;
     db::write_json(&export_dir.join("incident.json"), &incident)?;
 
     let evidence = conn.prepare("SELECT id,incident_id,kind,source,content_text,content_hash,created_at,metadata_json,attachment_id FROM evidence WHERE incident_id = ?1 ORDER BY created_at ASC").map_err(|e| e.to_string())?.query_map(params![&incident_id], |row| Ok(serde_json::json!({ "id": row.get::<_, String>(0)?, "incident_id": row.get::<_, String>(1)?, "kind": row.get::<_, String>(2)?, "source": row.get::<_, String>(3)?, "content_text": row.get::<_, Option<String>>(4)?, "content_hash": row.get::<_, String>(5)?, "created_at": row.get::<_, String>(6)?, "metadata_json": row.get::<_, String>(7)?, "attachment_id": row.get::<_, Option<String>>(8)? }))).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
@@ -176,10 +176,15 @@ pub fn import_incident(state: tauri::State<AppState>, export_path: String) -> Re
 
     let tx = conn.transaction().map_err(|error| error.to_string())?;
     tx.execute(
-        "INSERT INTO incidents VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO incidents (id, title, status, severity, impact, mitigation, pending_actions, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             incident_id,
             db::json_string(&incident, "title")?,
+            db::json_optional_string(&incident, "status").unwrap_or_else(|| "investigating".into()),
+            db::json_optional_string(&incident, "severity").unwrap_or_else(|| "unknown".into()),
+            db::json_optional_string(&incident, "impact").unwrap_or_default(),
+            db::json_optional_string(&incident, "mitigation").unwrap_or_default(),
+            db::json_optional_string(&incident, "pending_actions").unwrap_or_default(),
             db::json_string(&incident, "created_at")?,
             db::json_string(&incident, "updated_at")?
         ],

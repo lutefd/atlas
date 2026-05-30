@@ -10,14 +10,24 @@ pub fn create_incident(state: tauri::State<AppState>, title: String) -> Result<I
     let incident = Incident {
         id: db::id(),
         title,
+        status: "investigating".into(),
+        severity: "unknown".into(),
+        impact: String::new(),
+        mitigation: String::new(),
+        pending_actions: String::new(),
         created_at: db::now(),
         updated_at: db::now(),
     };
     conn.execute(
-        "INSERT INTO incidents VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO incidents (id, title, status, severity, impact, mitigation, pending_actions, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             incident.id,
             incident.title,
+            incident.status,
+            incident.severity,
+            incident.impact,
+            incident.mitigation,
+            incident.pending_actions,
             incident.created_at,
             incident.updated_at
         ],
@@ -41,14 +51,52 @@ pub fn rename_incident(
     )
     .map_err(|error| error.to_string())?;
     conn.query_row(
-        "SELECT id, title, created_at, updated_at FROM incidents WHERE id = ?1",
+        "SELECT id, title, status, severity, impact, mitigation, pending_actions, created_at, updated_at FROM incidents WHERE id = ?1",
         params![&incident_id],
         |row| {
             Ok(Incident {
                 id: row.get(0)?,
                 title: row.get(1)?,
-                created_at: row.get(2)?,
-                updated_at: row.get(3)?,
+                status: row.get(2)?,
+                severity: row.get(3)?,
+                impact: row.get(4)?,
+                mitigation: row.get(5)?,
+                pending_actions: row.get(6)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
+            })
+        },
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn update_incident_ops(
+    state: tauri::State<AppState>,
+    input: UpdateIncidentOpsInput,
+) -> Result<Incident, String> {
+    let _guard = state.lock.lock().map_err(|error| error.to_string())?;
+    let conn = db::open(&state.db_path)?;
+    let updated_at = db::now();
+    conn.execute(
+        "UPDATE incidents SET status = ?1, severity = ?2, impact = ?3, mitigation = ?4, pending_actions = ?5, updated_at = ?6 WHERE id = ?7",
+        params![input.status, input.severity, input.impact, input.mitigation, input.pending_actions, &updated_at, input.incident_id],
+    )
+    .map_err(|error| error.to_string())?;
+    conn.query_row(
+        "SELECT id, title, status, severity, impact, mitigation, pending_actions, created_at, updated_at FROM incidents WHERE id = ?1",
+        params![input.incident_id],
+        |row| {
+            Ok(Incident {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                status: row.get(2)?,
+                severity: row.get(3)?,
+                impact: row.get(4)?,
+                mitigation: row.get(5)?,
+                pending_actions: row.get(6)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
             })
         },
     )

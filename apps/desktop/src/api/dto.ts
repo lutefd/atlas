@@ -9,6 +9,11 @@ import type {
 export type IncidentDto = {
 	id: string;
 	title: string;
+	status: string;
+	severity: string;
+	impact: string;
+	mitigation: string;
+	pending_actions: string;
 	created_at: string;
 	updated_at: string;
 };

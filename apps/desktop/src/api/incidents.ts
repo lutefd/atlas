@@ -15,6 +15,19 @@ export async function renameIncident(
 	);
 }
 
+export async function updateIncidentOps(input: {
+	incidentId: string;
+	status: string;
+	severity: string;
+	impact: string;
+	mitigation: string;
+	pendingActions: string;
+}): Promise<Incident> {
+	return toIncident(
+		await invoke<import("./dto").IncidentDto>("update_incident_ops", input),
+	);
+}
+
 export async function deleteIncident(incidentId: string) {
 	await invoke("delete_incident", { incidentId });
 }

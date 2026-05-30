@@ -28,6 +28,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::create_incident,
             commands::rename_incident,
+            commands::update_incident_ops,
             commands::add_evidence,
             commands::save_parser_output,
             commands::create_job,

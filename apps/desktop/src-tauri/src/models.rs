@@ -4,6 +4,11 @@ use serde::{Deserialize, Serialize};
 pub struct Incident {
     pub id: String,
     pub title: String,
+    pub status: String,
+    pub severity: String,
+    pub impact: String,
+    pub mitigation: String,
+    pub pending_actions: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -148,6 +153,16 @@ pub struct UpdateTimelineInput {
     pub title: String,
     pub description: String,
     pub source_evidence_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateIncidentOpsInput {
+    pub incident_id: String,
+    pub status: String,
+    pub severity: String,
+    pub impact: String,
+    pub mitigation: String,
+    pub pending_actions: String,
 }
 
 #[derive(Deserialize)]

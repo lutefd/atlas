@@ -20,6 +20,11 @@ export type Evidence = z.infer<typeof evidenceSchema>;
 export type Incident = {
 	id: string;
 	title: string;
+	status: string;
+	severity: string;
+	impact: string;
+	mitigation: string;
+	pendingActions: string;
 	createdAt: string;
 	updatedAt: string;
 };
