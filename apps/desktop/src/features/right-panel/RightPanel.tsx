@@ -1,4 +1,4 @@
-import type { Evidence } from "@atlas/shared";
+import type { Evidence, Incident } from "@atlas/shared";
 import type { Snapshot } from "../../api";
 import { EntitiesPanel } from "./EntitiesPanel";
 import { SearchPanel } from "./SearchPanel";
@@ -7,6 +7,7 @@ import { TimelinePanel } from "./TimelinePanel";
 
 export function RightPanel({
 	incidentId,
+	incident,
 	timeline,
 	entities,
 	tags,
@@ -14,6 +15,7 @@ export function RightPanel({
 	onSelectEvidence,
 }: {
 	incidentId: string;
+	incident: Incident;
 	timeline: Snapshot["timelineEvents"];
 	entities: Snapshot["entities"];
 	tags: Snapshot["tags"];
@@ -30,6 +32,7 @@ export function RightPanel({
 			/>
 			<TimelinePanel
 				incidentId={incidentId}
+				incident={incident}
 				timeline={timeline}
 				evidence={evidence}
 				onSelectEvidence={onSelectEvidence}

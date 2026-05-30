@@ -1,10 +1,11 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { useState } from "react";
-import type { Evidence } from "@atlas/shared";
+import type { Evidence, Incident } from "@atlas/shared";
 import {
 	createManualTimelineEvent,
 	deleteManualTimelineEvent,
+	updateIncidentOps,
 	updateManualTimelineEvent,
 } from "../../api";
 import type { Snapshot } from "../../api";
@@ -17,24 +18,29 @@ const quickEvents = [
 	{
 		title: "Mitigation started",
 		description: "Mitigation work started.",
+		status: "mitigating",
 	},
 	{
 		title: "Monitoring",
 		description: "Mitigation is in place and the incident is being monitored.",
+		status: "monitoring",
 	},
 	{
 		title: "Resolved",
 		description: "Incident resolved.",
+		status: "resolved",
 	},
 ];
 
 export function TimelinePanel({
 	incidentId,
+	incident,
 	timeline,
 	evidence,
 	onSelectEvidence,
 }: {
 	incidentId: string;
+	incident: Incident;
 	timeline: Snapshot["timelineEvents"];
 	evidence: Evidence[];
 	onSelectEvidence: (id: string) => void;
@@ -73,14 +79,24 @@ export function TimelinePanel({
 		},
 	});
 	const quickEventMutation = useMutation({
-		mutationFn: (event: (typeof quickEvents)[number]) =>
-			createManualTimelineEvent({
+		mutationFn: async (event: (typeof quickEvents)[number]) => {
+			await createManualTimelineEvent({
 				incidentId,
 				timestamp: new Date().toISOString(),
 				title: event.title,
 				description: event.description,
 				sourceEvidenceId: null,
-			}),
+			});
+			if (!event.status || event.status === incident.status) return;
+			await updateIncidentOps({
+				incidentId,
+				status: event.status,
+				severity: incident.severity,
+				impact: incident.impact,
+				mitigation: incident.mitigation,
+				pendingActions: incident.pendingActions,
+			});
+		},
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["snapshot"] });
 		},

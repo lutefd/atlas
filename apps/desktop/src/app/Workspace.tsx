@@ -348,6 +348,7 @@ export function Workspace() {
 					</section>
 					<RightPanel
 						incidentId={active.id}
+						incident={active}
 						timeline={timeline}
 						entities={entities}
 						tags={tags}

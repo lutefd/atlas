@@ -6,7 +6,6 @@ import { ingestEvidence } from "./evidence-ingestion";
 export function EvidenceInbox({ incidentId }: { incidentId: string }) {
 	const queryClient = useQueryClient();
 	const [text, setText] = useState("");
-	const [url, setUrl] = useState("");
 	const [error, setError] = useState<string | null>(null);
 	const [status, setStatus] = useState<string | null>(null);
 	const mutation = useMutation({
@@ -20,44 +19,42 @@ export function EvidenceInbox({ incidentId }: { incidentId: string }) {
 			queryClient.invalidateQueries({ queryKey: ["snapshot"] });
 		},
 	});
-	async function addText(kind = "text") {
-		if (!text.trim()) return;
-		setError(null);
-		setStatus("Saving evidence...");
-		try {
-			await mutation.mutateAsync({
-				kind,
-				source: kind === "note" ? "quick note" : "paste",
-				text,
-			});
-			setText("");
-			setStatus("Evidence saved. Parser run recorded.");
-		} catch (caught) {
-			setError(caught instanceof Error ? caught.message : String(caught));
-		}
-	}
-	async function addUrl() {
-		const trimmed = url.trim();
-		if (!trimmed) return;
-		setError(null);
-		setStatus("Saving URL evidence...");
+	function parseUrlOnly(value: string) {
+		const trimmed = value.trim();
+		if (!trimmed || /\s/.test(trimmed)) return null;
 		try {
 			const parsed = new URL(trimmed);
+			return parsed.protocol === "http:" || parsed.protocol === "https:"
+				? parsed
+				: null;
+		} catch {
+			return null;
+		}
+	}
+	async function addText(kind = "text") {
+		const trimmed = text.trim();
+		if (!trimmed) return;
+		setError(null);
+		const parsedUrl = kind === "text" ? parseUrlOnly(trimmed) : null;
+		setStatus(parsedUrl ? "Saving URL evidence..." : "Saving evidence...");
+		try {
 			await mutation.mutateAsync({
-				kind: "url",
-				source: parsed.hostname,
-				text: parsed.toString(),
+				kind: parsedUrl ? "url" : kind,
+				source: parsedUrl
+					? parsedUrl.hostname
+					: kind === "note"
+						? "quick note"
+						: "paste",
+				text: parsedUrl ? parsedUrl.toString() : text,
 			});
-			setUrl("");
-			setStatus("URL evidence saved.");
-		} catch (caught) {
-			setError(
-				caught instanceof TypeError
-					? "Enter a valid URL including https://"
-					: caught instanceof Error
-						? caught.message
-						: String(caught),
+			setText("");
+			setStatus(
+				parsedUrl
+					? "URL evidence saved."
+					: "Evidence saved. Parser run recorded.",
 			);
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
 		}
 	}
 	async function addFile(file: File, source: string) {
@@ -134,20 +131,9 @@ export function EvidenceInbox({ incidentId }: { incidentId: string }) {
 			<CodeMirror
 				value={text}
 				height="180px"
-				placeholder="Paste logs, Slack snippets, commands, notes, or incident observations..."
+				placeholder="Paste logs, Slack snippets, commands, notes, URLs, or incident observations..."
 				onChange={setText}
 			/>
-			<div className="url-capture">
-				<input
-					value={url}
-					placeholder="Paste dashboard, trace, alert, PR, runbook, or ticket URL"
-					onChange={(event) => setUrl(event.target.value)}
-					onKeyDown={(event) => {
-						if (event.key === "Enter") void addUrl();
-					}}
-				/>
-				<button onClick={() => void addUrl()}>Save URL</button>
-			</div>
 			<div className="actions">
 				<button onClick={() => addText("text")}>Save evidence</button>
 				<button onClick={() => addText("note")}>Save quick note</button>
