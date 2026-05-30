@@ -26,6 +26,7 @@ import {
 } from "../features/evidence/evidence-ingestion";
 import { IncidentRenameInput } from "../features/incidents/IncidentRenameInput";
 import { IncidentSidebar } from "../features/incidents/IncidentSidebar";
+import { OnCallDashboard } from "../features/incidents/OnCallDashboard";
 import {
 	buildIncidentMarkdown,
 	buildSlackIncidentMessage,
@@ -338,6 +339,7 @@ export function Workspace() {
 										: `Parser replay complete for ${replayStatus.split(":")[1]} evidence item(s).`}
 								</p>
 							) : null}
+							<OnCallDashboard incident={active} />
 							<EvidenceInbox incidentId={active.id} />
 							<EvidenceStream
 								evidence={evidence}
@@ -375,4 +377,3 @@ export function Workspace() {
 		</main>
 	);
 }
-
