@@ -41,6 +41,28 @@
 	background: #172018;
 	color: #f7f2e8;
 }
+.quick-events {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-bottom: 10px;
+}
+.quick-events button {
+	background: rgba(23, 32, 24, 0.08);
+	color: #172018;
+	border-radius: 999px;
+	padding: 6px 9px;
+	font-size: 12px;
+	font-weight: 800;
+}
+.quick-events button:hover {
+	background: #172018;
+	color: #f7f2e8;
+}
+.quick-events button:disabled {
+	cursor: not-allowed;
+	opacity: 0.56;
+}
 input,
 textarea,
 select {

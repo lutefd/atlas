@@ -9,6 +9,25 @@ import {
 } from "../../api";
 import type { Snapshot } from "../../api";
 
+const quickEvents = [
+	{
+		title: "Detected",
+		description: "Incident detected and investigation started.",
+	},
+	{
+		title: "Mitigation started",
+		description: "Mitigation work started.",
+	},
+	{
+		title: "Monitoring",
+		description: "Mitigation is in place and the incident is being monitored.",
+	},
+	{
+		title: "Resolved",
+		description: "Incident resolved.",
+	},
+];
+
 export function TimelinePanel({
 	incidentId,
 	timeline,
@@ -53,6 +72,19 @@ export function TimelinePanel({
 			queryClient.invalidateQueries({ queryKey: ["snapshot"] });
 		},
 	});
+	const quickEventMutation = useMutation({
+		mutationFn: (event: (typeof quickEvents)[number]) =>
+			createManualTimelineEvent({
+				incidentId,
+				timestamp: new Date().toISOString(),
+				title: event.title,
+				description: event.description,
+				sourceEvidenceId: null,
+			}),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["snapshot"] });
+		},
+	});
 
 	function openNewEventModal() {
 		setEditingEventId(null);
@@ -90,6 +122,17 @@ export function TimelinePanel({
 			<div className="panel-heading">
 				<h2>Timeline</h2>
 				<button onClick={openNewEventModal}>Add event</button>
+			</div>
+			<div className="quick-events">
+				{quickEvents.map((event) => (
+					<button
+						disabled={quickEventMutation.isPending}
+						key={event.title}
+						onClick={() => quickEventMutation.mutate(event)}
+					>
+						{event.title}
+					</button>
+				))}
 			</div>
 			<div className="timeline-list">
 				{timeline.length ? (
