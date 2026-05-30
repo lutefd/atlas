@@ -241,9 +241,7 @@ export function Workspace() {
 					createIncidentMutation.mutate(`Incident ${incidents.length + 1}`)
 				}
 				onImport={() => void importIncidentFromPath()}
-				onStartRename={(id) =>
-					setEditingIncident({ id, surface: "sidebar" })
-				}
+				onStartRename={(id) => setEditingIncident({ id, surface: "sidebar" })}
 				onSaveRename={(id, title) =>
 					renameIncidentMutation.mutate({ id, title })
 				}
@@ -314,66 +312,66 @@ export function Workspace() {
 										</button>
 									</div>
 								</details>
-									<button
-										className="secondary"
-										disabled={
-											replayStatus === "running" ||
-											evidence.every((item) => !item.contentText)
-										}
-										onClick={() => void replayIncidentParsers()}
-									>
-										{replayStatus === "running"
-											? "Replaying..."
-											: "Replay parsers"}
-									</button>
-								</div>
-							</div>
-							{replayStatus && replayStatus !== "running" ? (
-								<p
-									className={
-										replayStatus === "failed" ? "error" : "replay-status"
+								<button
+									className="secondary"
+									disabled={
+										replayStatus === "running" ||
+										evidence.every((item) => !item.contentText)
 									}
+									onClick={() => void replayIncidentParsers()}
 								>
-									{replayStatus === "failed"
-										? "Parser replay failed. Raw evidence was preserved."
-										: `Parser replay complete for ${replayStatus.split(":")[1]} evidence item(s).`}
-								</p>
-							) : null}
-							<OnCallDashboard incident={active} />
-							<EvidenceInbox incidentId={active.id} />
-							<EvidenceStream
-								evidence={evidence}
-								selectedEvidenceId={selectedEvidenceId}
-								onSelectEvidence={selectEvidence}
-								snapshot={data}
-							/>
-						</section>
-						<RightPanel
-							incidentId={active.id}
-							timeline={timeline}
-							entities={entities}
-							tags={tags}
-							evidence={evidence}
-							onSelectEvidence={selectEvidence}
-						/>
-						{selectedEvidence ? (
-							<EvidenceDetail
-								item={selectedEvidence}
-								snapshot={data}
-								onClose={() => selectEvidence(null)}
-							/>
+									{replayStatus === "running"
+										? "Replaying..."
+										: "Replay parsers"}
+								</button>
+							</div>
+						</div>
+						{replayStatus && replayStatus !== "running" ? (
+							<p
+								className={
+									replayStatus === "failed" ? "error" : "replay-status"
+								}
+							>
+								{replayStatus === "failed"
+									? "Parser replay failed. Raw evidence was preserved."
+									: `Parser replay complete for ${replayStatus.split(":")[1]} evidence item(s).`}
+							</p>
 						) : null}
-					</>
-				) : (
-					<section className="empty">
-						<Inbox size={40} />
-						<h1>Create an incident workspace</h1>
-						<p>
-							Paste logs, notes, screenshots, and files. Atlas keeps raw evidence
-							immutable and derives structure beside it.
-						</p>
+						<OnCallDashboard incident={active} />
+						<EvidenceInbox incidentId={active.id} />
+						<EvidenceStream
+							evidence={evidence}
+							selectedEvidenceId={selectedEvidenceId}
+							onSelectEvidence={selectEvidence}
+							snapshot={data}
+						/>
 					</section>
-				)}
+					<RightPanel
+						incidentId={active.id}
+						timeline={timeline}
+						entities={entities}
+						tags={tags}
+						evidence={evidence}
+						onSelectEvidence={selectEvidence}
+					/>
+					{selectedEvidence ? (
+						<EvidenceDetail
+							item={selectedEvidence}
+							snapshot={data}
+							onClose={() => selectEvidence(null)}
+						/>
+					) : null}
+				</>
+			) : (
+				<section className="empty">
+					<Inbox size={40} />
+					<h1>Create an incident workspace</h1>
+					<p>
+						Paste logs, notes, screenshots, and files. Atlas keeps raw evidence
+						immutable and derives structure beside it.
+					</p>
+				</section>
+			)}
 		</main>
 	);
 }

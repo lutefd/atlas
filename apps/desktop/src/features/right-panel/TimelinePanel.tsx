@@ -139,9 +139,7 @@ export function TimelinePanel({
 					timeline.map((event) => (
 						<div
 							className={
-								event.sourceParserOutputId
-									? "event derived"
-									: "event manual"
+								event.sourceParserOutputId ? "event derived" : "event manual"
 							}
 							key={event.id}
 						>
@@ -151,9 +149,7 @@ export function TimelinePanel({
 									onSelectEvidence(event.sourceEvidenceId)
 								}
 							>
-								<time>
-									{new Date(event.timestamp).toLocaleString()}
-								</time>
+								<time>{new Date(event.timestamp).toLocaleString()}</time>
 								<strong>{event.title}</strong>
 								<span>
 									{event.sourceParserOutputId
@@ -163,13 +159,9 @@ export function TimelinePanel({
 							</button>
 							{!event.sourceParserOutputId ? (
 								<div className="event-actions">
-									<button onClick={() => editManualEvent(event)}>
-										Edit
-									</button>
+									<button onClick={() => editManualEvent(event)}>Edit</button>
 									<button
-										onClick={() =>
-											deleteManualEventMutation.mutate(event.id)
-										}
+										onClick={() => deleteManualEventMutation.mutate(event.id)}
 									>
 										Delete
 									</button>
@@ -179,18 +171,15 @@ export function TimelinePanel({
 					))
 				) : (
 					<p className="muted">
-						No timeline events yet. Atlas only adds derived events when
-						parsers find incident signals such as timestamps, deploys, errors,
-						timeouts, or 5xx statuses.
+						No timeline events yet. Atlas only adds derived events when parsers
+						find incident signals such as timestamps, deploys, errors, timeouts,
+						or 5xx statuses.
 					</p>
 				)}
 			</div>
 			{isEventModalOpen ? (
 				<div className="modal-backdrop" onClick={closeEventModal}>
-					<div
-						className="modal"
-						onClick={(event) => event.stopPropagation()}
-					>
+					<div className="modal" onClick={(event) => event.stopPropagation()}>
 						<div className="modal-header">
 							<h2>{editingEventId ? "Edit event" : "Add event"}</h2>
 							<button className="icon-button" onClick={closeEventModal}>
@@ -247,9 +236,7 @@ export function TimelinePanel({
 							<div className="manual-event-actions">
 								<button
 									onClick={() => saveManualEventMutation.mutate()}
-									disabled={
-										!manualEvent.title.trim() || !manualEvent.timestamp
-									}
+									disabled={!manualEvent.title.trim() || !manualEvent.timestamp}
 								>
 									{editingEventId ? "Update event" : "Add event"}
 								</button>

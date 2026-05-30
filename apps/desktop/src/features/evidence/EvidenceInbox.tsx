@@ -6,6 +6,7 @@ import { ingestEvidence } from "./evidence-ingestion";
 export function EvidenceInbox({ incidentId }: { incidentId: string }) {
 	const queryClient = useQueryClient();
 	const [text, setText] = useState("");
+	const [url, setUrl] = useState("");
 	const [error, setError] = useState<string | null>(null);
 	const [status, setStatus] = useState<string | null>(null);
 	const mutation = useMutation({
@@ -33,6 +34,30 @@ export function EvidenceInbox({ incidentId }: { incidentId: string }) {
 			setStatus("Evidence saved. Parser run recorded.");
 		} catch (caught) {
 			setError(caught instanceof Error ? caught.message : String(caught));
+		}
+	}
+	async function addUrl() {
+		const trimmed = url.trim();
+		if (!trimmed) return;
+		setError(null);
+		setStatus("Saving URL evidence...");
+		try {
+			const parsed = new URL(trimmed);
+			await mutation.mutateAsync({
+				kind: "url",
+				source: parsed.hostname,
+				text: parsed.toString(),
+			});
+			setUrl("");
+			setStatus("URL evidence saved.");
+		} catch (caught) {
+			setError(
+				caught instanceof TypeError
+					? "Enter a valid URL including https://"
+					: caught instanceof Error
+						? caught.message
+						: String(caught),
+			);
 		}
 	}
 	async function addFile(file: File, source: string) {
@@ -112,6 +137,17 @@ export function EvidenceInbox({ incidentId }: { incidentId: string }) {
 				placeholder="Paste logs, Slack snippets, commands, notes, or incident observations..."
 				onChange={setText}
 			/>
+			<div className="url-capture">
+				<input
+					value={url}
+					placeholder="Paste dashboard, trace, alert, PR, runbook, or ticket URL"
+					onChange={(event) => setUrl(event.target.value)}
+					onKeyDown={(event) => {
+						if (event.key === "Enter") void addUrl();
+					}}
+				/>
+				<button onClick={() => void addUrl()}>Save URL</button>
+			</div>
 			<div className="actions">
 				<button onClick={() => addText("text")}>Save evidence</button>
 				<button onClick={() => addText("note")}>Save quick note</button>

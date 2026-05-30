@@ -39,6 +39,8 @@ export function EvidenceCard({
 	const isImageAttachment = Boolean(
 		attachmentUrl && attachment?.mimeType.startsWith("image/"),
 	);
+	const evidenceUrl =
+		item.kind === "url" && item.contentText ? item.contentText : null;
 	useEffect(() => {
 		if (!status && !isConfirmingDelete) return;
 		const timeout = window.setTimeout(() => {
@@ -63,9 +65,15 @@ export function EvidenceCard({
 				return;
 			}
 			await navigator.clipboard.writeText(
-				item.contentText || attachment?.name || "",
+				evidenceUrl || item.contentText || attachment?.name || "",
 			);
-			setStatus(item.contentText ? "Text copied" : "Attachment name copied");
+			setStatus(
+				evidenceUrl
+					? "URL copied"
+					: item.contentText
+						? "Text copied"
+						: "Attachment name copied",
+			);
 		} catch (caught) {
 			setStatus(caught instanceof Error ? caught.message : "Copy failed");
 		}
@@ -146,8 +154,19 @@ export function EvidenceCard({
 					{attachment.name}
 				</a>
 			) : null}
+			{evidenceUrl ? (
+				<a
+					className="evidence-url"
+					href={evidenceUrl}
+					target="_blank"
+					rel="noreferrer"
+					onClick={(event) => event.stopPropagation()}
+				>
+					{evidenceUrl}
+				</a>
+			) : null}
 			<pre>
-				{item.contentText ||
+				{(evidenceUrl ? "" : item.contentText) ||
 					(item.attachmentId ? "Attachment stored locally" : "")}
 			</pre>
 			{status ? <div className="copy-status">{status}</div> : null}

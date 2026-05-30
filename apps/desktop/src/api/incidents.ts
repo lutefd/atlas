@@ -3,7 +3,9 @@ import type { Incident } from "@atlas/shared";
 import { toIncident } from "./mappers";
 
 export async function createIncident(title: string): Promise<Incident> {
-	return toIncident(await invoke<import("./dto").IncidentDto>("create_incident", { title }));
+	return toIncident(
+		await invoke<import("./dto").IncidentDto>("create_incident", { title }),
+	);
 }
 
 export async function renameIncident(
@@ -11,7 +13,10 @@ export async function renameIncident(
 	title: string,
 ): Promise<Incident> {
 	return toIncident(
-		await invoke<import("./dto").IncidentDto>("rename_incident", { incidentId, title }),
+		await invoke<import("./dto").IncidentDto>("rename_incident", {
+			incidentId,
+			title,
+		}),
 	);
 }
 

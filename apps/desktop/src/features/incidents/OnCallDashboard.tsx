@@ -57,7 +57,9 @@ export function OnCallDashboard({ incident }: { incident: Incident }) {
 				</div>
 				<div className="dashboard-badges">
 					<strong>{incident.severity.toUpperCase()}</strong>
-					<span>Updated {new Date(incident.updatedAt).toLocaleTimeString()}</span>
+					<span>
+						Updated {new Date(incident.updatedAt).toLocaleTimeString()}
+					</span>
 				</div>
 			</div>
 			<div className="dashboard-grid">

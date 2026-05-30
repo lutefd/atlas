@@ -1,6 +1,12 @@
 import { z } from "zod";
 
-export const evidenceKinds = ["text", "note", "file", "screenshot"] as const;
+export const evidenceKinds = [
+	"text",
+	"note",
+	"file",
+	"screenshot",
+	"url",
+] as const;
 
 export const evidenceSchema = z.object({
 	id: z.string(),

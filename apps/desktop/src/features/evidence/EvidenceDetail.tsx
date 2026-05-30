@@ -36,6 +36,8 @@ export function EvidenceDetail({
 	const attachmentUrl = attachment
 		? `data:${attachment.mimeType};base64,${attachment.base64}`
 		: null;
+	const evidenceUrl =
+		item.kind === "url" && item.contentText ? item.contentText : null;
 	const canReplay = Boolean(item.contentText);
 	const canOcr = Boolean(attachment?.mimeType.startsWith("image/"));
 	async function handleReplay() {
@@ -145,8 +147,18 @@ export function EvidenceDetail({
 			) : null}
 			<section>
 				<h3>Raw evidence</h3>
+				{evidenceUrl ? (
+					<a
+						className="evidence-url"
+						href={evidenceUrl}
+						target="_blank"
+						rel="noreferrer"
+					>
+						{evidenceUrl}
+					</a>
+				) : null}
 				<pre>
-					{item.contentText ||
+					{(evidenceUrl ? "" : item.contentText) ||
 						(item.attachmentId ? "Attachment stored locally" : "")}
 				</pre>
 			</section>
